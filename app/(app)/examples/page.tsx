@@ -45,7 +45,7 @@ export default function ExamplesPage() {
   async function uploadExample() {
     if (!file) return;
     const formData = new FormData();
-    formData.set("title", title || file.name.replace(/\.(docx|txt)$/i, ""));
+    formData.set("title", title || file.name.replace(/\.(doc|docx|txt)$/i, ""));
     formData.set("type", type);
     formData.set("status", status);
     formData.set("file", file);
@@ -87,8 +87,8 @@ export default function ExamplesPage() {
             </select>
           </div>
           <div className="field">
-            <label>Plik DOCX lub TXT</label>
-            <input className="input" type="file" accept=".docx,.txt" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+            <label>Plik DOC, DOCX lub TXT</label>
+            <input className="input" type="file" accept=".doc,.docx,.txt" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
           </div>
           <button className="button accent" type="button" onClick={uploadExample} disabled={!file}>
             <FileUp size={18} aria-hidden />

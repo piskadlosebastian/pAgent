@@ -159,7 +159,7 @@ export default function NewOpinionPage() {
         <div className="field" style={{ marginTop: "16px" }}>
           <label>Załącz plik źródłowy po zapisaniu dokumentu</label>
           <div style={{ display: "flex", gap: "12px" }}>
-            <input className="input" type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} style={{ flex: 1 }} />
+            <input className="input" type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" onChange={(event) => setFile(event.target.files?.[0] ?? null)} style={{ flex: 1 }} />
             <button className="button secondary" type="button" onClick={uploadFile} disabled={!createdDocument || !file}>
               <FileUp size={18} aria-hidden />
               Dodaj plik

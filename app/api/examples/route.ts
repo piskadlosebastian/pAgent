@@ -10,6 +10,7 @@ import { writeAuditLog } from "@/lib/audit";
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const allowedMimeTypes = new Set([
+  "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain"
 ]);
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
 
   if (!parsed.success) return NextResponse.json({ error: "Nieprawidłowe dane przykładu." }, { status: 400 });
   if (!(file instanceof File)) return NextResponse.json({ error: "Brak pliku." }, { status: 400 });
-  if (!allowedMimeTypes.has(file.type)) return NextResponse.json({ error: "Do bazy wiedzy dodaj DOCX lub TXT." }, { status: 400 });
+  if (!allowedMimeTypes.has(file.type)) return NextResponse.json({ error: "Do bazy wiedzy dodaj DOC, DOCX lub TXT." }, { status: 400 });
   if (file.size > MAX_FILE_SIZE) return NextResponse.json({ error: "Plik przekracza limit 12 MB." }, { status: 400 });
 
   const storedName = `${randomUUID()}-${file.name.replace(/[^a-z0-9._-]+/gi, "_")}`;

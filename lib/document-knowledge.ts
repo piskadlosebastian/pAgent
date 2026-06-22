@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import mammoth from "mammoth";
+import WordExtractor from "word-extractor";
 import type { Child, DocumentTemplate, KnowledgeExample, PppDocumentType, UploadedFile } from "../generated/prisma/client";
 
 export const PPP_DOCUMENT_TYPES: { value: PppDocumentType; label: string }[] = [
@@ -39,7 +40,20 @@ export async function extractDocxText(storagePath: string) {
   return normalizeText(result.value);
 }
 
+export async function extractDocText(storagePath: string) {
+  try {
+    const extractor = new WordExtractor();
+    const document = await extractor.extract(storagePath);
+    return normalizeText(document.getBody());
+  } catch {
+    return "";
+  }
+}
+
 export async function extractPlainText(storagePath: string, mimeType?: string | null) {
+  if (mimeType === "application/msword") {
+    return extractDocText(storagePath);
+  }
   if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     return extractDocxText(storagePath);
   }

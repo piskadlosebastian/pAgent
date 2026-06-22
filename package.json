@@ -30,6 +30,7 @@
     "prisma": "^7.8.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "word-extractor": "^1.0.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
