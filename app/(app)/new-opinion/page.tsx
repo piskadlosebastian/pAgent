@@ -144,6 +144,7 @@ export default function NewOpinionPage() {
             onChange={(event) => {
               setPppType(event.target.value);
               setType(event.target.options[event.target.selectedIndex].text);
+              if (!title) setTitle(event.target.options[event.target.selectedIndex].text);
             }}
           >
             <option value="KS">KS</option>

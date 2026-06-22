@@ -32,6 +32,19 @@ export function normalizePppType(value?: string | null): PppDocumentType {
   return "INNE";
 }
 
+export function inferPppType(input: {
+  explicitType?: PppDocumentType | string | null;
+  title?: string | null;
+  documentType?: string | null;
+  notes?: string | null;
+}): PppDocumentType {
+  const text = [input.title, input.documentType, input.notes].filter(Boolean).join(" ").toUpperCase();
+  if (/\bWWR\b/.test(text) || text.includes("WCZESNE WSPOMAGANIE")) return "WWR";
+  if (/\bKS\b/.test(text) || text.includes("KS -") || text.includes("KARTA SPECJALISTYCZNA")) return "KS";
+  if (input.explicitType) return normalizePppType(input.explicitType);
+  return normalizePppType(input.documentType);
+}
+
 export function pppTypeLabel(type: PppDocumentType | string) {
   return PPP_DOCUMENT_TYPES.find((item) => item.value === type)?.label ?? "Inne";
 }

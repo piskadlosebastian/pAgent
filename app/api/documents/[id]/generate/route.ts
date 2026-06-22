@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { generateOpinionDraft } from "@/lib/ai";
-import { buildKnowledgeQuery, extractPlainText, findSimilarExamples, normalizePppType } from "@/lib/document-knowledge";
+import { buildKnowledgeQuery, extractPlainText, findSimilarExamples, inferPppType } from "@/lib/document-knowledge";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { writeAuditLog } from "@/lib/audit";
@@ -16,7 +16,12 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   });
   if (!document) return NextResponse.json({ error: "Nie znaleziono dokumentu." }, { status: 404 });
 
-  const pppType = document.pppType ?? normalizePppType(document.type);
+  const pppType = inferPppType({
+    explicitType: document.pppType,
+    title: document.title,
+    documentType: document.type,
+    notes: document.specialistNotes
+  });
   const template =
     document.template ??
     (await prisma.documentTemplate.findFirst({
@@ -72,6 +77,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       generatedContent: generated.content,
       templateId: template.id,
       templateVersion: template.version,
+      pppType,
       validationStatus: generated.validationReport?.valid ? "VALID" : "NEEDS_FIX",
       validationReport: generated.validationReport as Prisma.InputJsonValue | undefined
     },

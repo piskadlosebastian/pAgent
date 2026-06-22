@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/session";
 import { documentSchema } from "@/lib/validators";
 import { generateOpinionDraft } from "@/lib/ai";
 import { writeAuditLog } from "@/lib/audit";
-import { buildKnowledgeQuery, findSimilarExamples, normalizePppType } from "@/lib/document-knowledge";
+import { buildKnowledgeQuery, findSimilarExamples, inferPppType } from "@/lib/document-knowledge";
 
 export async function GET(request: Request) {
   const user = await requireUser();
@@ -41,7 +41,12 @@ export async function POST(request: Request) {
     : null;
 
   const shouldGenerate = Boolean(payload.generateDraft);
-  const pppType = parsed.data.pppType ?? normalizePppType(parsed.data.type);
+  const pppType = inferPppType({
+    explicitType: parsed.data.pppType,
+    title: parsed.data.title,
+    documentType: parsed.data.type,
+    notes: parsed.data.specialistNotes
+  });
   const template = await prisma.documentTemplate.findFirst({
     where: { organizationId: user.organizationId, type: pppType, status: "ACTIVE" },
     orderBy: { createdAt: "desc" }
