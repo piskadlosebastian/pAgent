@@ -49,6 +49,9 @@ export async function generateOpinionDraft(input: {
       agentId: agent.id
     })) ?? undefined;
   }
+  if (agent.provider === "dify") {
+    aiSections = (await generateWithDify(input)) ?? undefined;
+  }
 
   const content = composeFromTemplate({
     template: input.template,
@@ -100,6 +103,50 @@ function generateNoTemplateDraft(input: {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+async function generateWithDify(input: {
+  child: Child;
+  documentType: string;
+  specialistNotes?: string | null;
+  uploadedFiles?: UploadedFile[];
+  sourceTexts?: string[];
+  template?: DocumentTemplate | null;
+  similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
+}) {
+  const apiUrl = process.env.DIFY_API_URL;
+  const apiKey = process.env.DIFY_API_KEY;
+  if (!apiUrl || !apiKey) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+
+  try {
+    const response = await fetch(`${apiUrl.replace(/\/$/, "")}/chat-messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        inputs: {
+          documentType: input.documentType,
+          templateSections: input.template ? JSON.stringify(asTemplateSections(input.template.sections)) : "[]"
+        },
+        query: buildOpinionPrompt(input),
+        response_mode: "blocking",
+        user: input.child.id
+      })
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { answer?: string };
+    return parseSectionJson(data.answer);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function generateWithOllama(input: {
