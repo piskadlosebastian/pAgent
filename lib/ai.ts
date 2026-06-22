@@ -2,7 +2,15 @@ import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "..
 import { getAiAgent, type AiAgentId } from "@/lib/ai-agents";
 import { asTemplateSections, composeFromTemplate, validateAgainstTemplate, type ValidationReport } from "@/lib/document-knowledge";
 
-export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś asystentem wspierającym tworzenie projektów dokumentów PPP. Najważniejsza zasada: wzór dokumentu jest nadrzędny wobec modelu AI. Nie wolno tworzyć własnej struktury dokumentu, dodawać nowych sekcji ani usuwać sekcji ze wzoru. Generujesz wyłącznie treść brakujących sekcji wskazanych w aktywnym wzorze. Nie diagnozujesz samodzielnie. Nie dopisujesz faktów, których nie ma w materiałach źródłowych, danych dziecka albo zweryfikowanych przykładach. Jeżeli brakuje danych, wpisz to w sekcji braków.`;
+export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś asystentem PPP do opracowywania projektów KS, WWR i opinii PPP. Zasada nadrzędna: aktywny wzór dokumentu jest ważniejszy niż model AI. Nie wolno Ci tworzyć własnego układu dokumentu, zmieniać kolejności sekcji, dodawać nowych sekcji ani usuwać sekcji ze wzoru. Twoja rola polega wyłącznie na wypełnieniu treści sekcji wskazanych przez system.
+
+Pracuj wyłącznie na faktach z:
+1. danych dziecka,
+2. załączonych dokumentów źródłowych, np. wyników badań,
+3. notatek specjalisty,
+4. zweryfikowanych przykładów wzorcowych.
+
+Nie diagnozuj samodzielnie. Nie twórz hipotez. Nie dopisuj wyników, trudności, zaleceń ani rozpoznań, których nie ma w materiałach źródłowych. Jeżeli dla sekcji brakuje danych, wpisz krótko: "Brak danych w załączonych materiałach - do uzupełnienia przez specjalistę". Styl ma być formalny, uporządkowany i zgodny z dokumentacją PPP.`;
 
 // Moduł anonimizacji (struktura)
 export function anonymizeData(text: string, child: Child): string {
@@ -59,6 +67,7 @@ export async function generateOpinionDraft(input: {
     documentType: input.documentType,
     specialistNotes: input.specialistNotes,
     sourceFiles: input.uploadedFiles,
+    sourceTexts: input.sourceTexts,
     similarExamples: input.similarExamples,
     aiSections
   });
@@ -176,7 +185,7 @@ async function generateWithOllama(input: {
         system: PPP_AGENT_SYSTEM_PROMPT,
         prompt: buildOpinionPrompt(input),
         options: {
-          temperature: 0.25,
+          temperature: 0.1,
           top_p: 0.9
         }
       })
@@ -206,6 +215,9 @@ function buildOpinionPrompt(input: {
     `Typ dokumentu: ${input.documentType}`,
     input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "Aktywny wzór: brak",
     "",
+    "Wzór dokumentu jest obowiązkowy. Poniżej znajduje się tekst wzoru do zachowania jako nadrzędny kontekst:",
+    input.template?.extractedText.slice(0, 7000) || "brak",
+    "",
     "Sekcje wzoru, których nie wolno zmieniać:",
     sections.map((section) => `- ${section.title}`).join("\n") || "brak",
     "",
@@ -219,12 +231,14 @@ function buildOpinionPrompt(input: {
     "",
     `Uwagi specjalisty: ${input.specialistNotes || "brak"}`,
     `Załączone pliki źródłowe: ${input.uploadedFiles?.length || 0}`,
-    ...(input.sourceTexts?.length ? ["", "Fragmenty dokumentów źródłowych:", input.sourceTexts.join("\n---\n")] : []),
+    ...(input.sourceTexts?.length
+      ? ["", "DOKUMENTY ŹRÓDŁOWE DO WYKORZYSTANIA. Wnioski i opisy mają wynikać z poniższych materiałów:", input.sourceTexts.join("\n---\n").slice(0, 14000)]
+      : ["", "DOKUMENTY ŹRÓDŁOWE DO WYKORZYSTANIA: brak odczytanego tekstu z załączników. Nie wolno wymyślać wyników badań."]),
     ...(input.similarExamples?.length
       ? ["", "Zweryfikowane przykłady wzorcowe RAG:", input.similarExamples.map((example) => `# ${example.title}\n${example.extractedText.slice(0, 2400)}`).join("\n---\n")]
       : []),
     "",
-    "Zwróć wyłącznie JSON w formacie: {\"Nazwa sekcji\":\"treść sekcji\"}. Kluczami mogą być tylko nazwy sekcji z listy wzoru. Nie zwracaj pełnego dokumentu, nie dodawaj nowych sekcji."
+    "Zwróć wyłącznie JSON w formacie: {\"Nazwa sekcji\":\"treść sekcji\"}. Kluczami mogą być tylko dokładne nazwy sekcji z listy wzoru. Nie zwracaj pełnego dokumentu. Nie dodawaj wstępów, komentarzy, markdown ani nowych nagłówków. Każda wartość JSON ma być gotową treścią danej sekcji, bez powtarzania nazwy sekcji."
   ].join("\n");
 }
 

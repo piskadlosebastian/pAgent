@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import mammoth from "mammoth";
+import { PDFParse } from "pdf-parse";
 import WordExtractor from "word-extractor";
 import type { Child, DocumentTemplate, KnowledgeExample, PppDocumentType, UploadedFile } from "../generated/prisma/client";
 
@@ -55,7 +56,21 @@ export async function extractDocText(storagePath: string) {
   }
 }
 
+export async function extractPdfText(storagePath: string) {
+  try {
+    const parser = new PDFParse({ data: await readFile(storagePath) });
+    const result = await parser.getText();
+    await parser.destroy();
+    return normalizeText(result.text);
+  } catch {
+    return "";
+  }
+}
+
 export async function extractPlainText(storagePath: string, mimeType?: string | null, fileName?: string | null) {
+  if (mimeType === "application/pdf" || fileHasExtension(fileName ?? storagePath, [".pdf"])) {
+    return extractPdfText(storagePath);
+  }
   if (mimeType === "application/msword" || fileHasExtension(fileName ?? storagePath, [".doc"])) {
     return extractDocText(storagePath);
   }
@@ -138,6 +153,7 @@ export function composeFromTemplate(input: {
   documentType: string;
   specialistNotes?: string | null;
   sourceFiles?: UploadedFile[];
+  sourceTexts?: string[];
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   aiSections?: Record<string, string>;
 }) {
@@ -202,6 +218,7 @@ function builtinSectionContent(sectionTitle: string, input: {
   child: Child;
   specialistNotes?: string | null;
   sourceFiles?: UploadedFile[];
+  sourceTexts?: string[];
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
 }) {
   const lower = sectionTitle.toLowerCase();
@@ -214,8 +231,9 @@ function builtinSectionContent(sectionTitle: string, input: {
     ].join("\n");
   }
   if (lower.includes("podstawa")) {
+    const fileList = input.sourceFiles?.map((file) => `- ${file.originalName}`).join("\n");
     return input.sourceFiles?.length
-      ? `Uwzględniono ${input.sourceFiles.length} dokumentów źródłowych.`
+      ? `Uwzględniono następujące dokumenty źródłowe:\n${fileList}`
       : "Brak załączonych dokumentów źródłowych. Sekcja wymaga uzupełnienia przez specjalistę.";
   }
   if (lower.includes("brak")) {
@@ -227,7 +245,11 @@ function builtinSectionContent(sectionTitle: string, input: {
   const exampleNote = input.similarExamples?.length
     ? `Styl sekcji powinien być zgodny ze zweryfikowanymi przykładami: ${input.similarExamples.map((item) => item.title).join(", ")}.`
     : "Brak przykładów wzorcowych dla tej kategorii.";
+  const sourceNote = input.sourceTexts?.length
+    ? `Materiał źródłowy do opracowania tej sekcji:\n${input.sourceTexts.join("\n---\n").slice(0, 3500)}`
+    : "Brak odczytanego tekstu z dokumentów źródłowych dla tej sekcji.";
   return [
+    sourceNote,
     input.specialistNotes ? `Materiał specjalisty: ${input.specialistNotes}` : "Treść wymaga uzupełnienia na podstawie materiałów źródłowych.",
     exampleNote
   ].join("\n");

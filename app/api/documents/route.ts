@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       generatedContent,
       templateId: template?.id,
       templateVersion: template?.version,
-      validationStatus: generatedResult?.validationReport?.valid ? "VALID" : template ? "NEEDS_FIX" : "NOT_VALIDATED",
+      validationStatus: generatedResult ? (generatedResult.validationReport?.valid ? "VALID" : "NEEDS_FIX") : "NOT_VALIDATED",
       validationReport: generatedResult?.validationReport as Prisma.InputJsonValue | undefined,
       userId: user.id,
       organizationId: user.organizationId

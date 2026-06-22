@@ -14,6 +14,7 @@ type CreatedDocument = {
   title: string;
   generatedContent?: string | null;
   validationStatus?: "NOT_VALIDATED" | "VALID" | "NEEDS_FIX";
+  files?: { id: string; originalName: string }[];
 };
 
 export default function NewOpinionPage() {
@@ -27,6 +28,7 @@ export default function NewOpinionPage() {
   const [createdDocument, setCreatedDocument] = useState<CreatedDocument | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState("");
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     fetch("/api/children")
@@ -37,8 +39,9 @@ export default function NewOpinionPage() {
       });
   }, []);
 
-  async function generateAndSave() {
+  async function saveDraft() {
     setMessage("");
+    setPending(true);
     const response = await fetch("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -50,9 +53,10 @@ export default function NewOpinionPage() {
         status: "DRAFT",
         specialistNotes,
         generatedContent,
-        generateDraft: !generatedContent
+        generateDraft: false
       })
     });
+    setPending(false);
     if (!response.ok) {
       setMessage("Nie udało się utworzyć dokumentu. Sprawdź, czy wybrano dziecko.");
       return;
@@ -60,27 +64,56 @@ export default function NewOpinionPage() {
     const document = await response.json();
     setCreatedDocument(document);
     setGeneratedContent(document.generatedContent ?? "");
-    setMessage("Dokument zapisany jako roboczy.");
+    setMessage("Dokument roboczy zapisany. Teraz dodaj wyniki badań i uruchom generowanie.");
   }
 
   async function uploadFile() {
     if (!file || !createdDocument) return;
+    setPending(true);
     const formData = new FormData();
     formData.set("documentId", createdDocument.id);
     formData.set("file", file);
     const response = await fetch("/api/uploads", { method: "POST", body: formData });
-    setMessage(response.ok ? "Plik został dodany do dokumentu." : "Nie udało się dodać pliku.");
+    setPending(false);
+    if (!response.ok) {
+      setMessage("Nie udało się dodać pliku.");
+      return;
+    }
+    const uploaded = await response.json();
+    setCreatedDocument({
+      ...createdDocument,
+      files: [...(createdDocument.files ?? []), { id: uploaded.id, originalName: uploaded.originalName }]
+    });
+    setFile(null);
+    setMessage("Plik źródłowy został dodany. Możesz dodać kolejne wyniki badań albo uruchomić generowanie.");
+  }
+
+  async function generateFromSources() {
+    if (!createdDocument) return;
+    setPending(true);
+    setMessage("Generuję projekt na podstawie aktywnego wzoru i załączonych dokumentów źródłowych...");
+    const response = await fetch(`/api/documents/${createdDocument.id}/generate`, { method: "POST" });
+    setPending(false);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setMessage(data.error ?? "Nie udało się wygenerować dokumentu.");
+      return;
+    }
+    const document = await response.json();
+    setCreatedDocument(document);
+    setGeneratedContent(document.generatedContent ?? "");
+    setMessage("Projekt został wygenerowany do weryfikacji specjalisty.");
   }
 
   const steps = ["Dane dziecka", "Typ i wzór", "Dokumenty źródłowe", "Generowanie", "Weryfikacja"];
-  const currentStep = generatedContent ? 4 : specialistNotes ? 3 : file ? 1 : 0;
+  const currentStep = generatedContent ? 4 : createdDocument?.files?.length ? 3 : createdDocument ? 2 : childId ? 1 : 0;
 
   return (
     <div className="grid">
       <section className="panel">
         <div className="page-title">
           <h1>Nowa opinia</h1>
-          <p>Elegancki proces prowadzi od wyboru dziecka do zapisu i eksportu projektu opinii PPP.</p>
+          <p>Najpierw wybierz aktywny wzór i zapisz dokument roboczy, potem dodaj wyniki badań, a dopiero na końcu uruchom generowanie.</p>
         </div>
         <div className="stepper" aria-label="Kroki tworzenia opinii">
           {steps.map((step, index) => (
@@ -127,12 +160,11 @@ export default function NewOpinionPage() {
           <label>Dodatkowe uwagi specjalisty</label>
           <textarea className="textarea" value={specialistNotes} onChange={(event) => setSpecialistNotes(event.target.value)} />
         </div>
-        <button className="button accent" type="button" onClick={generateAndSave} disabled={!childId}>
-          <Sparkles size={18} aria-hidden />
-          Wygeneruj projekt i zapisz
+        <button className="button accent" type="button" onClick={saveDraft} disabled={!childId || pending || Boolean(createdDocument)}>
+          Zapisz dokument roboczy
         </button>
         <p className="muted" style={{ fontSize: "12px" }}>
-          Generator użyje aktywnego wzoru dla wybranego typu. Bez aktywnego wzoru dokument zostanie oznaczony jako niewalidowany.
+          Generator zostanie uruchomiony dopiero po dodaniu dokumentów źródłowych. Aktywny wzór dla wybranego typu pozostaje nadrzędny wobec AI.
         </p>
       </section>
 
@@ -149,7 +181,7 @@ export default function NewOpinionPage() {
           className="textarea document-preview"
           value={generatedContent}
           onChange={(event) => setGeneratedContent(event.target.value)}
-          placeholder="Po wygenerowaniu tutaj pojawi się szkic dokumentu do ręcznej edycji."
+          placeholder="Po wygenerowaniu na podstawie wzoru i załączników tutaj pojawi się projekt dokumentu do weryfikacji."
         />
         {createdDocument?.validationStatus ? (
           <div className="alert">
@@ -157,16 +189,27 @@ export default function NewOpinionPage() {
           </div>
         ) : null}
         <div className="field" style={{ marginTop: "16px" }}>
-          <label>Załącz plik źródłowy po zapisaniu dokumentu</label>
+          <label>Załącz wyniki badań i inne dokumenty źródłowe</label>
           <div style={{ display: "flex", gap: "12px" }}>
             <input className="input" type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setFile(event.target.files?.[0] ?? null)} style={{ flex: 1 }} />
-            <button className="button secondary" type="button" onClick={uploadFile} disabled={!createdDocument || !file}>
+            <button className="button secondary" type="button" onClick={uploadFile} disabled={!createdDocument || !file || pending}>
               <FileUp size={18} aria-hidden />
               Dodaj plik
             </button>
           </div>
         </div>
-        <p className="muted" style={{ fontSize: "12px" }}>Pliki są zapisywane lokalnie w zabezpieczonym katalogu aplikacji i nie dostają publicznych linków.</p>
+        {createdDocument?.files?.length ? (
+          <ul style={{ margin: 0, paddingLeft: "20px" }}>
+            {createdDocument.files.map((item) => <li key={item.id}>{item.originalName}</li>)}
+          </ul>
+        ) : (
+          <p className="muted" style={{ fontSize: "12px" }}>Dodaj co najmniej jeden plik źródłowy przed generowaniem opinii WWR.</p>
+        )}
+        <button className="button accent" type="button" onClick={generateFromSources} disabled={!createdDocument || pending}>
+          <Sparkles size={18} aria-hidden />
+          Generuj z wzoru i załączników
+        </button>
+        <p className="muted" style={{ fontSize: "12px" }}>Pliki są zapisywane lokalnie i przekazywane do generatora jako materiał źródłowy. Treść obrazów wymaga ręcznego opisania w notatkach, jeśli nie ma OCR.</p>
       </section>
       </div>
     </div>
