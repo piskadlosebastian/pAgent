@@ -38,8 +38,8 @@ export async function generateOpinionDraft(input: {
   const sections = asTemplateSections(input.template.sections);
   let aiSections: Record<string, string> | undefined;
 
-  if (agent.provider === "ollama") {
-    aiSections = await generateFieldsWithOllama(input, sections, agent);
+  if (agent.provider === "gemini" || agent.provider === "openrouter") {
+    aiSections = await generateFieldsWithOnlineAgent(input, sections, agent);
   }
 
   if (agent.provider === "dify") {
@@ -78,48 +78,34 @@ function generateNoTemplateDraft(input: {
   ].join("\n");
 }
 
-async function generateFieldsWithOllama(input: GenerationInput, sections: TemplateSection[], agent: AiAgentDefinition) {
-  if (!agent.endpoint || !agent.model) return undefined;
-  const output: Record<string, string> = {};
+async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: TemplateSection[], selectedAgent: AiAgentDefinition) {
+  const agents = getOnlineFallbackAgents(selectedAgent);
 
-  for (const section of sections) {
+  for (const agent of agents) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const timeout = setTimeout(() => controller.abort(), 120_000);
 
     try {
-      const response = await fetch(agent.endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: agent.model,
-          stream: false,
-          system: PPP_AGENT_SYSTEM_PROMPT,
-          prompt: buildFieldPrompt(input, section),
-          options: {
-            temperature: 0.05,
-            top_p: 0.8,
-            repeat_penalty: 1.18,
-            num_predict: 360,
-            num_ctx: 8192
-          }
-        })
-      });
-
-      if (!response.ok) {
-        output[section.title] = "Brak danych w załączonych materiałach.";
-      } else {
-        const data = (await response.json()) as { response?: string; thinking?: string };
-        output[section.title] = sanitizeFieldAnswer(data.response);
-      }
+      const prompt = buildAllFieldsPrompt(input, sections);
+      const raw = agent.provider === "gemini"
+        ? await callGeminiAgent(agent, prompt, controller.signal)
+        : await callOpenRouterAgent(agent, prompt, controller.signal);
+      const parsed = parseFieldJson(raw);
+      const output = Object.fromEntries(
+        sections.map((section) => [
+          section.title,
+          sanitizeFieldAnswer(parsed[section.title])
+        ])
+      );
+      return output;
     } catch {
-      output[section.title] = "Brak danych w załączonych materiałach.";
+      // Try the next configured online agent.
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  return output;
+  return undefined;
 }
 
 async function generateFieldsWithDify(input: GenerationInput, sections: TemplateSection[]) {
@@ -177,6 +163,153 @@ type GenerationInput = {
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   agentId?: string | null;
 };
+
+function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
+  const candidates = [
+    selectedAgent,
+    getAiAgent("gemini_flash"),
+    getAiAgent("gemini_flash_lite"),
+    getAiAgent("openrouter_owl_alpha"),
+    getAiAgent("openrouter_free"),
+    getAiAgent("openrouter_kimi"),
+    getAiAgent("openrouter_gpt_oss_20b")
+  ];
+  const seen = new Set<string>();
+  return candidates
+    .filter((agent) => {
+      if (seen.has(agent.id)) return false;
+      seen.add(agent.id);
+      if (agent.provider === "gemini") return Boolean(process.env.GEMINI_API_KEY);
+      if (agent.provider === "openrouter") return Boolean(process.env.OPENROUTER_API_KEY);
+      return false;
+    });
+}
+
+async function callGeminiAgent(agent: AiAgentDefinition, prompt: string, signal: AbortSignal) {
+  if (!agent.model || !process.env.GEMINI_API_KEY) throw new Error("Missing Gemini configuration");
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${agent.model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `${PPP_AGENT_SYSTEM_PROMPT}\n\n${prompt}` }] }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json"
+        }
+      })
+    }
+  );
+  const data = await response.json();
+  if (!response.ok || data.error) {
+    throw new Error(data.error?.message || `Gemini returned HTTP_${response.status}`);
+  }
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  if (!text) throw new Error("Gemini returned empty content");
+  return text;
+}
+
+async function callOpenRouterAgent(agent: AiAgentDefinition, prompt: string, signal: AbortSignal) {
+  if (!agent.model || !process.env.OPENROUTER_API_KEY) throw new Error("Missing OpenRouter configuration");
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://pagent.nexurio.pl",
+      "X-Title": "pAgent"
+    },
+    signal,
+    body: JSON.stringify({
+      model: agent.model,
+      messages: [
+        { role: "system", content: PPP_AGENT_SYSTEM_PROMPT },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.1,
+      max_tokens: 8192
+    })
+  });
+  const data = await response.json();
+  if (!response.ok || data.error) {
+    throw new Error(data.error?.message || `OpenRouter returned HTTP_${response.status}`);
+  }
+  const text = data.choices?.[0]?.message?.content || "";
+  if (!text) throw new Error("OpenRouter returned empty content");
+  return text;
+}
+
+function buildAllFieldsPrompt(input: GenerationInput, sections: TemplateSection[]) {
+  const fields = sections.map((section, index) => ({
+    index: index + 1,
+    title: section.title,
+    parentHeading: section.parentHeading ?? "",
+    pointNumber: section.pointNumber ?? "",
+    instruction: section.instruction ?? section.title
+  }));
+
+  return [
+    `Typ dokumentu: ${input.documentType}`,
+    input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "",
+    "",
+    "Wypełnij wszystkie pola TEKST z aktywnego wzoru. Nie twórz nowej struktury dokumentu.",
+    "Zwróć wyłącznie poprawny JSON w formacie:",
+    "{\"fields\":[{\"title\":\"dokładny tytuł pola\",\"content\":\"treść do wklejenia\"}]}",
+    "",
+    "Pola do wypełnienia:",
+    JSON.stringify(fields, null, 2),
+    "",
+    "Dane dziecka:",
+    `- Imię i nazwisko: ${input.child.firstName} ${input.child.lastName}`,
+    `- Data urodzenia: ${input.child.birthDate.toISOString().slice(0, 10)}`,
+    `- Placówka: ${input.child.school || "brak"}`,
+    `- Klasa/grupa: ${input.child.classGroup || "brak"}`,
+    `- Rodzice/opiekunowie: ${input.child.guardians || "brak"}`,
+    `- Notatki w bazie dziecka: ${input.child.notes || "brak"}`,
+    "",
+    input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
+    "",
+    input.sourceTexts?.length
+      ? `Wybrane dokumenty źródłowe:\n${input.sourceTexts.join("\n---\n").slice(0, 24_000)}`
+      : "Dokumenty źródłowe: brak odczytanego tekstu.",
+    "",
+    input.similarExamples?.length
+      ? `Przykłady stylu, tylko pomocniczo:\n${input.similarExamples.map((example) => example.extractedText.slice(0, 1800)).join("\n---\n")}`
+      : "",
+    "",
+    "Zasady:",
+    "- każde pole odpowiada wyłącznie na swój punkt lub podpunkt wzoru;",
+    "- nie kopiuj pełnych akapitów ze źródeł, opracuj krótką syntezę;",
+    "- nie powtarzaj tego samego tekstu w wielu polach;",
+    "- jeśli dla pola nie ma danych, wpisz dokładnie: Brak danych w załączonych materiałach.;",
+    "- nie dodawaj nagłówków, numerów punktów ani komentarzy technicznych;",
+    "- treść jednego pola zwykle ma mieć 1-2 krótkie akapity."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseFieldJson(text: string): Record<string, string> {
+  const cleaned = text.trim();
+  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fenced?.[1] || cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
+  const parsed = JSON.parse(candidate) as { fields?: { title?: string; content?: string }[] } | Record<string, string>;
+
+  if ("fields" in parsed && Array.isArray(parsed.fields)) {
+    return Object.fromEntries(
+      parsed.fields
+        .filter((field) => typeof field.title === "string")
+        .map((field) => [field.title!, typeof field.content === "string" ? field.content : ""])
+    );
+  }
+
+  return Object.fromEntries(
+    Object.entries(parsed).filter(([, value]) => typeof value === "string")
+  ) as Record<string, string>;
+}
 
 function buildFieldPrompt(input: GenerationInput, section: TemplateSection) {
   return [

@@ -1,10 +1,22 @@
-export type AiAgentId = "pagent_builtin" | "dify_qwen3" | "ollama_qwen3" | "ollama_llama31" | "ollama_qwen25" | "ollama_gemma3";
+export type AiAgentId =
+  | "pagent_builtin"
+  | "gemini_flash"
+  | "gemini_flash_lite"
+  | "openrouter_owl_alpha"
+  | "openrouter_free"
+  | "openrouter_gpt_oss_120b"
+  | "openrouter_gpt_oss_20b"
+  | "openrouter_kimi"
+  | "openrouter_llama_33"
+  | "openrouter_qwen3_next"
+  | "openrouter_glm_air"
+  | "dify_qwen3";
 
 export type AiAgentDefinition = {
   id: AiAgentId;
   name: string;
   description: string;
-  provider: "builtin" | "ollama" | "dify";
+  provider: "builtin" | "gemini" | "openrouter" | "dify";
   model?: string;
   endpoint?: string;
 };
@@ -17,46 +29,84 @@ export const AI_AGENTS: AiAgentDefinition[] = [
     provider: "builtin"
   },
   {
+    id: "gemini_flash",
+    name: "Gemini 2.0 Flash",
+    description: "Szybki darmowy agent online. Rekomendowany do generowania opinii PPP na wzorze.",
+    provider: "gemini",
+    model: "gemini-2.0-flash"
+  },
+  {
+    id: "gemini_flash_lite",
+    name: "Gemini 2.0 Flash Lite",
+    description: "Najlżejszy szybki agent online. Dobry, gdy zależy nam na czasie generowania.",
+    provider: "gemini",
+    model: "gemini-2.0-flash-lite"
+  },
+  {
+    id: "openrouter_owl_alpha",
+    name: "OpenRouter Owl Alpha",
+    description: "Darmowy model online przez OpenRouter.",
+    provider: "openrouter",
+    model: "openrouter/owl-alpha"
+  },
+  {
+    id: "openrouter_free",
+    name: "OpenRouter Free Router",
+    description: "Automatyczny darmowy router modeli OpenRouter.",
+    provider: "openrouter",
+    model: "openrouter/free"
+  },
+  {
+    id: "openrouter_gpt_oss_120b",
+    name: "OpenAI GPT OSS 120B",
+    description: "Darmowy model online przez OpenRouter.",
+    provider: "openrouter",
+    model: "openai/gpt-oss-120b:free"
+  },
+  {
+    id: "openrouter_gpt_oss_20b",
+    name: "OpenAI GPT OSS 20B",
+    description: "Darmowy model online przez OpenRouter.",
+    provider: "openrouter",
+    model: "openai/gpt-oss-20b:free"
+  },
+  {
+    id: "openrouter_kimi",
+    name: "Kimi K2.6",
+    description: "Darmowy model online przez OpenRouter.",
+    provider: "openrouter",
+    model: "moonshotai/kimi-k2.6:free"
+  },
+  {
+    id: "openrouter_llama_33",
+    name: "Llama 3.3 70B",
+    description: "Darmowy model online przez OpenRouter.",
+    provider: "openrouter",
+    model: "meta-llama/llama-3.3-70b-instruct:free"
+  },
+  {
+    id: "openrouter_qwen3_next",
+    name: "Qwen3 Next 80B",
+    description: "Darmowy model online przez OpenRouter.",
+    provider: "openrouter",
+    model: "qwen/qwen3-next-80b-a3b-instruct:free"
+  },
+  {
+    id: "openrouter_glm_air",
+    name: "GLM 4.5 Air",
+    description: "Darmowy model online przez OpenRouter.",
+    provider: "openrouter",
+    model: "z-ai/glm-4.5-air:free"
+  },
+  {
     id: "dify_qwen3",
-    name: "Dify + Ollama Qwen3",
-    description: "Rekomendowana architektura: pAgent przekazuje kontekst RAG do Dify, a Dify obsługuje Qwen3 przez Ollama.",
+    name: "Dify",
+    description: "Zewnętrzny workflow Dify, jeśli zostanie skonfigurowany w zmiennych środowiskowych.",
     provider: "dify"
-  },
-  {
-    id: "ollama_qwen3",
-    name: "Qwen 2.5 3B przez Ollama",
-    description: "Darmowy lokalny model na VPS. Stabilniejszy do generowania treści dokumentów niż modele z trybem rozumowania.",
-    provider: "ollama",
-    model: "qwen2.5:3b",
-    endpoint: "http://ollama:11434/api/generate"
-  },
-  {
-    id: "ollama_llama31",
-    name: "Llama 3.1 przez Ollama",
-    description: "Darmowy lokalny model uruchamiany na VPS przez Ollama.",
-    provider: "ollama",
-    model: "llama3.1",
-    endpoint: "http://ollama:11434/api/generate"
-  },
-  {
-    id: "ollama_qwen25",
-    name: "Qwen 2.5 przez Ollama",
-    description: "Darmowy lokalny model, zwykle dobry do pracy z dłuższym tekstem.",
-    provider: "ollama",
-    model: "qwen2.5:3b",
-    endpoint: "http://ollama:11434/api/generate"
-  },
-  {
-    id: "ollama_gemma3",
-    name: "Gemma 3 przez Ollama",
-    description: "Darmowy lokalny model do spokojnego generowania szkiców dokumentów.",
-    provider: "ollama",
-    model: "gemma3",
-    endpoint: "http://ollama:11434/api/generate"
   }
 ];
 
-export const DEFAULT_AI_AGENT_ID: AiAgentId = "pagent_builtin";
+export const DEFAULT_AI_AGENT_ID: AiAgentId = "gemini_flash";
 
 export function getAiAgent(agentId?: string | null) {
   return AI_AGENTS.find((agent) => agent.id === agentId) ?? AI_AGENTS.find((agent) => agent.id === DEFAULT_AI_AGENT_ID)!;

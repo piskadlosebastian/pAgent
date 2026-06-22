@@ -24,8 +24,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
-        condition: service_started
     expose:
       - "3000"
     volumes:
@@ -33,14 +31,6 @@ services:
       - pagent-templates:/app/storage/templates
       - pagent-examples:/app/storage/examples
     command: sh -c "npx prisma migrate deploy && npm run start"
-
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    volumes:
-      - ollama-data:/root/.ollama
-    expose:
-      - "11434"
 
   caddy:
     image: caddy:2-alpine
@@ -62,6 +52,5 @@ volumes:
   pagent-uploads:
   pagent-templates:
   pagent-examples:
-  ollama-data:
   caddy-data:
   caddy-config:
