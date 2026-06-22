@@ -38,7 +38,7 @@ export async function generateOpinionDraft(input: {
   const sections = asTemplateSections(input.template.sections);
   let aiSections: Record<string, string> | undefined;
 
-  if (agent.provider === "gemini" || agent.provider === "openrouter") {
+  if (agent.provider === "pollinations" || agent.provider === "gemini" || agent.provider === "openrouter") {
     aiSections = await generateFieldsWithOnlineAgent(input, sections, agent);
   }
 
@@ -89,7 +89,9 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
       const prompt = buildAllFieldsPrompt(input, sections);
       const raw = agent.provider === "gemini"
         ? await callGeminiAgent(agent, prompt, controller.signal)
-        : await callOpenRouterAgent(agent, prompt, controller.signal);
+        : agent.provider === "openrouter"
+          ? await callOpenRouterAgent(agent, prompt, controller.signal)
+          : await callPollinationsAgent(agent, prompt, controller.signal);
       const parsed = parseFieldJson(raw);
       const output = Object.fromEntries(
         sections.map((section) => [
@@ -172,7 +174,9 @@ function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
     getAiAgent("openrouter_owl_alpha"),
     getAiAgent("openrouter_free"),
     getAiAgent("openrouter_kimi"),
-    getAiAgent("openrouter_gpt_oss_20b")
+    getAiAgent("openrouter_gpt_oss_20b"),
+    getAiAgent("pollinations_openai"),
+    getAiAgent("pollinations_mistral")
   ];
   const seen = new Set<string>();
   return candidates
@@ -181,8 +185,41 @@ function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
       seen.add(agent.id);
       if (agent.provider === "gemini") return Boolean(process.env.GEMINI_API_KEY);
       if (agent.provider === "openrouter") return Boolean(process.env.OPENROUTER_API_KEY);
+      if (agent.provider === "pollinations") return true;
       return false;
     });
+}
+
+async function callPollinationsAgent(agent: AiAgentDefinition, prompt: string, signal: AbortSignal) {
+  if (!agent.endpoint || !agent.model) throw new Error("Missing Pollinations configuration");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (process.env.POLLINATIONS_API_KEY) {
+    headers.Authorization = `Bearer ${process.env.POLLINATIONS_API_KEY}`;
+  }
+
+  const response = await fetch(agent.endpoint, {
+    method: "POST",
+    headers,
+    signal,
+    body: JSON.stringify({
+      model: agent.model,
+      messages: [
+        { role: "system", content: PPP_AGENT_SYSTEM_PROMPT },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.1,
+      max_tokens: 8192,
+      stream: false,
+      reasoning_effort: "minimal"
+    })
+  });
+  const data = await response.json();
+  if (!response.ok || data.error) {
+    throw new Error(data.error?.message || `Pollinations returned HTTP_${response.status}`);
+  }
+  const text = data.choices?.[0]?.message?.content || "";
+  if (!text) throw new Error("Pollinations returned empty content");
+  return text;
 }
 
 async function callGeminiAgent(agent: AiAgentDefinition, prompt: string, signal: AbortSignal) {

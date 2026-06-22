@@ -1,5 +1,7 @@
 export type AiAgentId =
   | "pagent_builtin"
+  | "pollinations_openai"
+  | "pollinations_mistral"
   | "gemini_flash"
   | "gemini_flash_lite"
   | "openrouter_owl_alpha"
@@ -16,7 +18,7 @@ export type AiAgentDefinition = {
   id: AiAgentId;
   name: string;
   description: string;
-  provider: "builtin" | "gemini" | "openrouter" | "dify";
+  provider: "builtin" | "pollinations" | "gemini" | "openrouter" | "dify";
   model?: string;
   endpoint?: string;
 };
@@ -27,6 +29,22 @@ export const AI_AGENTS: AiAgentDefinition[] = [
     name: "pAgent Lokalny",
     description: "Wbudowany agent PPP. Działa bez internetu, konta i klucza API.",
     provider: "builtin"
+  },
+  {
+    id: "pollinations_openai",
+    name: "Pollinations OpenAI",
+    description: "Darmowy agent online bez klucza API. Najszybszy wariant awaryjny bez obciążania VPS.",
+    provider: "pollinations",
+    model: "openai",
+    endpoint: "https://text.pollinations.ai/openai"
+  },
+  {
+    id: "pollinations_mistral",
+    name: "Pollinations Mistral",
+    description: "Darmowy agent online bez klucza API, zwykle szybki przy prostszych zadaniach.",
+    provider: "pollinations",
+    model: "mistral",
+    endpoint: "https://text.pollinations.ai/openai"
   },
   {
     id: "gemini_flash",
@@ -106,7 +124,7 @@ export const AI_AGENTS: AiAgentDefinition[] = [
   }
 ];
 
-export const DEFAULT_AI_AGENT_ID: AiAgentId = "gemini_flash";
+export const DEFAULT_AI_AGENT_ID: AiAgentId = "pollinations_openai";
 
 export function getAiAgent(agentId?: string | null) {
   return AI_AGENTS.find((agent) => agent.id === agentId) ?? AI_AGENTS.find((agent) => agent.id === DEFAULT_AI_AGENT_ID)!;

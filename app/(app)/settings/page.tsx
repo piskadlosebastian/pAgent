@@ -7,7 +7,7 @@ type AgentOption = {
   id: string;
   name: string;
   description: string;
-  provider: "builtin" | "gemini" | "openrouter" | "dify";
+  provider: "builtin" | "pollinations" | "gemini" | "openrouter" | "dify";
   model?: string;
 };
 
@@ -108,7 +108,9 @@ export default function SettingsPage() {
                 <h3>{selectedAgent.name}</h3>
                 <p className="muted">{selectedAgent.description}</p>
                 <span className="badge status-APPROVED">
-                  {selectedAgent.provider === "gemini"
+                  {selectedAgent.provider === "pollinations"
+                    ? `Pollinations: ${selectedAgent.model}`
+                    : selectedAgent.provider === "gemini"
                     ? `Gemini: ${selectedAgent.model}`
                     : selectedAgent.provider === "openrouter"
                       ? `OpenRouter: ${selectedAgent.model}`
