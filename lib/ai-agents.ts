@@ -24,10 +24,10 @@ export const AI_AGENTS: AiAgentDefinition[] = [
   },
   {
     id: "ollama_qwen3",
-    name: "Qwen3 przez Ollama",
-    description: "Darmowy lokalny model Qwen3 uruchamiany na VPS przez Ollama.",
+    name: "Qwen 2.5 3B przez Ollama",
+    description: "Darmowy lokalny model na VPS. Stabilniejszy do generowania treści dokumentów niż modele z trybem rozumowania.",
     provider: "ollama",
-    model: "qwen3:4b",
+    model: "qwen2.5:3b",
     endpoint: "http://ollama:11434/api/generate"
   },
   {
@@ -43,7 +43,7 @@ export const AI_AGENTS: AiAgentDefinition[] = [
     name: "Qwen 2.5 przez Ollama",
     description: "Darmowy lokalny model, zwykle dobry do pracy z dłuższym tekstem.",
     provider: "ollama",
-    model: "qwen2.5",
+    model: "qwen2.5:3b",
     endpoint: "http://ollama:11434/api/generate"
   },
   {

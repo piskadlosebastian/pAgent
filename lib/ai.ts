@@ -99,7 +99,9 @@ async function generateFieldsWithOllama(input: GenerationInput, sections: Templa
           options: {
             temperature: 0.05,
             top_p: 0.8,
-            repeat_penalty: 1.18
+            repeat_penalty: 1.18,
+            num_predict: 360,
+            num_ctx: 8192
           }
         })
       });
@@ -107,7 +109,7 @@ async function generateFieldsWithOllama(input: GenerationInput, sections: Templa
       if (!response.ok) {
         output[section.title] = "Brak danych w załączonych materiałach.";
       } else {
-        const data = (await response.json()) as { response?: string };
+        const data = (await response.json()) as { response?: string; thinking?: string };
         output[section.title] = sanitizeFieldAnswer(data.response);
       }
     } catch {
@@ -207,8 +209,10 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection) {
     "",
     "Instrukcja odpowiedzi:",
     "- odpowiedz tylko na to jedno zagadnienie;",
-    "- nie kopiuj całych dokumentów źródłowych;",
+    "- opracuj krótką syntezę na podstawie źródeł, a nie streszczenie całego pliku;",
+    "- nie kopiuj całych dokumentów źródłowych ani pełnych akapitów ze źródeł;",
     "- nie powtarzaj informacji, które pasują do innych pól;",
+    "- maksymalnie 1-2 krótkie akapity, chyba że punkt wzoru wyraźnie wymaga dłuższego opisu;",
     "- nie dodawaj nagłówków, numerów punktów, komentarzy technicznych ani instrukcji dla AI;",
     "- nie używaj fraz: Materiał źródłowy, Brak przykładów wzorcowych, Treść wymaga uzupełnienia, Plik ...;",
     "- jeśli materiały nie zawierają danych dla tego pola, zwróć dokładnie: Brak danych w załączonych materiałach.",
@@ -223,6 +227,9 @@ function sanitizeFieldAnswer(answer?: string | null) {
   const cleaned = (answer ?? "")
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/^Okay,\s+the\s+user[\s\S]*$/i, "")
+    .replace(/^Let me think[\s\S]*$/i, "")
     .replace(/^(odpowiedź|treść|opis)\s*:\s*/i, "")
     .replace(/Materia[lł] źródłowy[^.\n]*(\.|\n)?/gi, "")
     .replace(/Brak przykładów wzorcowych[^.\n]*(\.|\n)?/gi, "")
