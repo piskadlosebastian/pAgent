@@ -6,6 +6,7 @@ main
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 /generated/prisma
 .next
