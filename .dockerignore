@@ -1,4 +1,5 @@
 .git
+pAgent
 .next
 generated
 node_modules
@@ -10,3 +11,5 @@ npm-debug.log
 storage/uploads/*
 !storage/uploads/.gitkeep
 tsconfig.tsbuildinfo
+git
+main

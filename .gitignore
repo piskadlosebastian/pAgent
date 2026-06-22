@@ -1,4 +1,7 @@
 node_modules
+pAgent/
+git
+main
 # Keep environment variables out of version control
 .env
 .env.*
