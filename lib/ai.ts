@@ -94,10 +94,10 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
           : await callPollinationsAgent(agent, prompt, controller.signal);
       const parsed = parseFieldJson(raw);
       const output = Object.fromEntries(
-        sections.map((section) => [
-          section.title,
-          sanitizeFieldAnswer(parsed[section.title])
-        ])
+        sections.map((section, index) => {
+          const answer = parsed[section.title] || parsed[`field_${index + 1}`] || parsed[String(index + 1)];
+          return [section.title, sanitizeFieldAnswer(answer, input.sourceTexts)];
+        })
       );
       return output;
     } catch {
@@ -281,6 +281,7 @@ async function callOpenRouterAgent(agent: AiAgentDefinition, prompt: string, sig
 
 function buildAllFieldsPrompt(input: GenerationInput, sections: TemplateSection[]) {
   const fields = sections.map((section, index) => ({
+    id: `field_${index + 1}`,
     index: index + 1,
     title: section.title,
     parentHeading: section.parentHeading ?? "",
@@ -294,7 +295,7 @@ function buildAllFieldsPrompt(input: GenerationInput, sections: TemplateSection[
     "",
     "Wypełnij wszystkie pola TEKST z aktywnego wzoru. Nie twórz nowej struktury dokumentu.",
     "Zwróć wyłącznie poprawny JSON w formacie:",
-    "{\"fields\":[{\"title\":\"dokładny tytuł pola\",\"content\":\"treść do wklejenia\"}]}",
+    "{\"fields\":[{\"id\":\"field_1\",\"title\":\"dokładny tytuł pola\",\"content\":\"treść do wklejenia\"}]}",
     "",
     "Pola do wypełnienia:",
     JSON.stringify(fields, null, 2),
@@ -310,7 +311,7 @@ function buildAllFieldsPrompt(input: GenerationInput, sections: TemplateSection[
     input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
     "",
     input.sourceTexts?.length
-      ? `Wybrane dokumenty źródłowe:\n${input.sourceTexts.join("\n---\n").slice(0, 24_000)}`
+      ? `Wybrane dokumenty źródłowe do analizy, nie do kopiowania:\n${input.sourceTexts.join("\n---\n").slice(0, 18_000)}`
       : "Dokumenty źródłowe: brak odczytanego tekstu.",
     "",
     input.similarExamples?.length
@@ -319,11 +320,12 @@ function buildAllFieldsPrompt(input: GenerationInput, sections: TemplateSection[
     "",
     "Zasady:",
     "- każde pole odpowiada wyłącznie na swój punkt lub podpunkt wzoru;",
-    "- nie kopiuj pełnych akapitów ze źródeł, opracuj krótką syntezę;",
+    "- nie wolno przepisywać ani wklejać pełnych zdań, akapitów lub całego badania ze źródeł;",
+    "- opracuj własnymi słowami krótką syntezę faktów pasujących tylko do danego pola;",
     "- nie powtarzaj tego samego tekstu w wielu polach;",
     "- jeśli dla pola nie ma danych, wpisz dokładnie: Brak danych w załączonych materiałach.;",
     "- nie dodawaj nagłówków, numerów punktów ani komentarzy technicznych;",
-    "- treść jednego pola zwykle ma mieć 1-2 krótkie akapity."
+    "- treść jednego pola ma mieć maksymalnie 600 znaków, chyba że punkt wzoru wyraźnie wymaga więcej."
   ]
     .filter(Boolean)
     .join("\n");
@@ -333,14 +335,16 @@ function parseFieldJson(text: string): Record<string, string> {
   const cleaned = text.trim();
   const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   const candidate = fenced?.[1] || cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
-  const parsed = JSON.parse(candidate) as { fields?: { title?: string; content?: string }[] } | Record<string, string>;
+  const parsed = JSON.parse(candidate) as { fields?: { id?: string; title?: string; content?: string }[] } | Record<string, string>;
 
   if ("fields" in parsed && Array.isArray(parsed.fields)) {
-    return Object.fromEntries(
-      parsed.fields
-        .filter((field) => typeof field.title === "string")
-        .map((field) => [field.title!, typeof field.content === "string" ? field.content : ""])
-    );
+    const output: Record<string, string> = {};
+    for (const field of parsed.fields) {
+      const content = typeof field.content === "string" ? field.content : "";
+      if (typeof field.id === "string") output[field.id] = content;
+      if (typeof field.title === "string") output[field.title] = content;
+    }
+    return output;
   }
 
   return Object.fromEntries(
@@ -393,7 +397,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection) {
     .join("\n");
 }
 
-function sanitizeFieldAnswer(answer?: string | null) {
+function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[]) {
   const cleaned = (answer ?? "")
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
@@ -408,5 +412,41 @@ function sanitizeFieldAnswer(answer?: string | null) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
+  if (hasCopiedSourceFragment(cleaned, sourceTexts)) {
+    return "Brak danych w załączonych materiałach.";
+  }
+
   return cleaned || "Brak danych w załączonych materiałach.";
+}
+
+function hasCopiedSourceFragment(answer: string, sourceTexts?: string[]) {
+  if (!answer.trim() || !sourceTexts?.length) return false;
+  const normalizedAnswer = normalizeForCopyCheck(answer);
+  if (normalizedAnswer.length < 220) return false;
+
+  const normalizedSources = sourceTexts.map(normalizeForCopyCheck).join("\n");
+  if (!normalizedSources) return false;
+
+  const paragraphs = answer
+    .split(/\n{1,}/)
+    .map((paragraph) => normalizeForCopyCheck(paragraph))
+    .filter((paragraph) => paragraph.length >= 180);
+  if (paragraphs.some((paragraph) => normalizedSources.includes(paragraph))) return true;
+
+  const words = normalizedAnswer.split(/\s+/).filter(Boolean);
+  const windowSize = 36;
+  for (let index = 0; index <= words.length - windowSize; index += 12) {
+    const fragment = words.slice(index, index + windowSize).join(" ");
+    if (fragment.length >= 180 && normalizedSources.includes(fragment)) return true;
+  }
+
+  return false;
+}
+
+function normalizeForCopyCheck(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

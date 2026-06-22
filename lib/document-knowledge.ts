@@ -182,15 +182,20 @@ export function composeFromTemplate(input: {
   aiSections?: Record<string, string>;
 }) {
   const sections = asTemplateSections(input.template.sections);
+  const isMarkerTemplate = sections.some((section) => section.marker === "TEKST");
   const sectionContent = Object.fromEntries(
     sections.map((section) => [
       section.title,
-      input.aiSections?.[section.title]?.trim() || builtinSectionContent(section.title, input)
+      input.aiSections?.[section.title]?.trim() || (isMarkerTemplate ? missingFieldContent() : builtinSectionContent(section.title, input))
     ])
   );
   const filled = fillTemplateText(input.template.extractedText, sections, sectionContent);
   const footer = "Dokument wymaga weryfikacji i zatwierdzenia przez uprawnionego specjalistę";
   return filled.toLowerCase().includes(footer.toLowerCase()) ? filled : `${filled}\n\n${footer}`;
+}
+
+function missingFieldContent() {
+  return "Brak danych w załączonych materiałach.";
 }
 
 export function validateAgainstTemplate(content: string, template: Pick<DocumentTemplate, "sections">): ValidationReport {
