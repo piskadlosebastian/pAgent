@@ -5,7 +5,7 @@ import { AppLogo } from "@/components/AppLogo";
 import { BottomNav } from "@/components/BottomNav";
 import { SignOutButton } from "@/components/SignOutButton";
 import { authOptions } from "@/lib/auth";
-import { FileText, Home, Settings, Sparkles, Users } from "lucide-react";
+import { BookOpenCheck, FileStack, FileText, Home, Settings, Sparkles, Users } from "lucide-react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
@@ -29,6 +29,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/documents" className="sidebar-item">
             <FileText size={20} aria-hidden />
             <span>Dokumenty</span>
+          </Link>
+          <Link href="/templates" className="sidebar-item">
+            <FileStack size={20} aria-hidden />
+            <span>Wzory dokumentów</span>
+          </Link>
+          <Link href="/examples" className="sidebar-item">
+            <BookOpenCheck size={20} aria-hidden />
+            <span>Przykłady wzorcowe</span>
           </Link>
           <Link href="/new-opinion" className="sidebar-item">
             <Sparkles size={20} aria-hidden />

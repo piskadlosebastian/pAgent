@@ -13,3 +13,7 @@ main
 tsconfig.tsbuildinfo
 storage/uploads/*
 !storage/uploads/.gitkeep
+storage/templates/*
+!storage/templates/.gitkeep
+storage/examples/*
+!storage/examples/.gitkeep

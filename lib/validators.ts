@@ -14,9 +14,23 @@ export const documentSchema = z.object({
   childId: z.string().min(1),
   title: z.string().min(1).max(180),
   type: z.string().min(1).max(120),
+  pppType: z.enum(["KS", "WWR", "OPINIA_PPP", "INNE"]).optional(),
   status: z.enum(["DRAFT", "REVIEW", "APPROVED", "ARCHIVED"]).default("DRAFT"),
   specialistNotes: z.string().max(4000).optional().nullable(),
   generatedContent: z.string().max(30000).optional().nullable()
+});
+
+export const documentTemplateSchema = z.object({
+  name: z.string().min(1).max(180),
+  type: z.enum(["KS", "WWR", "OPINIA_PPP", "INNE"]),
+  version: z.string().min(1).max(40),
+  active: z.boolean().optional()
+});
+
+export const knowledgeExampleSchema = z.object({
+  title: z.string().min(1).max(180),
+  type: z.enum(["KS", "WWR", "OPINIA_PPP", "INNE"]),
+  status: z.enum(["MODEL", "SUPPORTING", "ARCHIVED"])
 });
 
 export const passwordChangeSchema = z.object({

@@ -10,6 +10,8 @@ type DocumentItem = {
   status: "DRAFT" | "REVIEW" | "APPROVED" | "ARCHIVED";
   specialistNotes?: string | null;
   generatedContent?: string | null;
+  validationStatus: "NOT_VALIDATED" | "VALID" | "NEEDS_FIX";
+  learningDecision?: "MODEL" | "SUPPORTING" | "DO_NOT_USE" | null;
   createdAt: string;
   childId: string;
   child: { firstName: string; lastName: string };
@@ -63,6 +65,16 @@ export default function DocumentsPage() {
     await loadDocuments();
   }
 
+  async function setLearningDecision(decision: "MODEL" | "SUPPORTING" | "DO_NOT_USE") {
+    if (!selected) return;
+    await fetch(`/api/documents/${selected.id}/learning`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision })
+    });
+    await loadDocuments();
+  }
+
   return (
     <div className="grid grid-2">
       <section className="panel table-card">
@@ -84,6 +96,7 @@ export default function DocumentsPage() {
                 <th>Tytuł</th>
                 <th>Dziecko</th>
                 <th>Status</th>
+                <th>Zgodność</th>
                 <th>Akcje</th>
               </tr>
             </thead>
@@ -105,6 +118,11 @@ export default function DocumentsPage() {
                   <td>{document.child.firstName} {document.child.lastName}</td>
                   <td><span className={`badge status-${document.status}`}>{document.status}</span></td>
                   <td>
+                    <span className={`badge ${document.validationStatus === "VALID" ? "status-APPROVED" : document.validationStatus === "NEEDS_FIX" ? "status-REVIEW" : "status-DRAFT"}`}>
+                      {document.validationStatus === "VALID" ? "Zgodny" : document.validationStatus === "NEEDS_FIX" ? "Wymaga poprawy" : "Niezwalidowany"}
+                    </span>
+                  </td>
+                  <td>
                     <div style={{ display: "flex", gap: "8px" }}>
                       <a className="button secondary" href={`/api/documents/${document.id}/export`} aria-label="Pobierz DOCX">
                         <Download size={16} aria-hidden />
@@ -117,7 +135,7 @@ export default function DocumentsPage() {
                 </tr>
               ))}
               {!documents.length ? (
-                <tr><td colSpan={4} className="muted">Brak dokumentów dla wybranego filtra.</td></tr>
+                <tr><td colSpan={5} className="muted">Brak dokumentów dla wybranego filtra.</td></tr>
               ) : null}
             </tbody>
           </table>
@@ -135,7 +153,24 @@ export default function DocumentsPage() {
         {selected ? (
           <div className="form">
             <p className="muted">{selected.type} dla {selected.child.firstName} {selected.child.lastName}</p>
+            <div className="toolbar" style={{ marginBottom: 0 }}>
+              <span className={`badge ${selected.validationStatus === "VALID" ? "status-APPROVED" : selected.validationStatus === "NEEDS_FIX" ? "status-REVIEW" : "status-DRAFT"}`}>
+                {selected.validationStatus === "VALID" ? "Zgodny ze wzorem" : selected.validationStatus === "NEEDS_FIX" ? "Wymaga poprawy" : "Niezwalidowany"}
+              </span>
+              <span className="badge">{selected.learningDecision ? "Decyzja jakości: " + selected.learningDecision : "Bez decyzji jakości"}</span>
+            </div>
             <textarea className="textarea document-preview" value={content} onChange={(event) => setContent(event.target.value)} />
+            <div className="toolbar" style={{ justifyContent: "flex-start", marginBottom: 0 }}>
+              <button className="button secondary" type="button" onClick={() => setLearningDecision("MODEL")}>
+                Zatwierdź jako wzorcowy
+              </button>
+              <button className="button secondary" type="button" onClick={() => setLearningDecision("SUPPORTING")}>
+                Zatwierdź jako pomocniczy
+              </button>
+              <button className="button secondary" type="button" onClick={() => setLearningDecision("DO_NOT_USE")}>
+                Nie używaj do uczenia
+              </button>
+            </div>
             <div style={{ marginTop: "16px" }}>
               <span className="muted" style={{ fontWeight: 600 }}>Załączniki:</span>
               <ul style={{ marginTop: "8px", paddingLeft: "20px" }}>

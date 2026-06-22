@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, Home, Settings, Sparkles, Users } from "lucide-react";
+import { FileStack, FileText, Home, Settings, Sparkles, Users } from "lucide-react";
 import clsx from "clsx";
 
 const items = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/children", label: "Dzieci", icon: Users },
   { href: "/documents", label: "Dokumenty", icon: FileText },
+  { href: "/templates", label: "Wzory", icon: FileStack },
   { href: "/new-opinion", label: "Nowa opinia", icon: Sparkles },
   { href: "/settings", label: "Ustawienia", icon: Settings }
 ];

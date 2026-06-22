@@ -24,6 +24,36 @@ enum DocumentStatus {
   ARCHIVED
 }
 
+enum PppDocumentType {
+  KS
+  WWR
+  OPINIA_PPP
+  INNE
+}
+
+enum TemplateStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum KnowledgeExampleStatus {
+  MODEL
+  SUPPORTING
+  ARCHIVED
+}
+
+enum LearningDecision {
+  MODEL
+  SUPPORTING
+  DO_NOT_USE
+}
+
+enum ValidationStatus {
+  NOT_VALIDATED
+  VALID
+  NEEDS_FIX
+}
+
 model Organization {
   id             String   @id @default(cuid())
   name           String
@@ -38,6 +68,8 @@ model Organization {
   updatedAt      DateTime @updatedAt
 
   users User[]
+  documentTemplates DocumentTemplate[]
+  knowledgeExamples KnowledgeExample[]
 }
 
 model User {
@@ -54,6 +86,8 @@ model User {
   children     Child[]
   documents    Document[]
   uploadedFiles UploadedFile[]
+  documentTemplates DocumentTemplate[]
+  knowledgeExamples KnowledgeExample[]
   auditLogs    AuditLog[]
 }
 
@@ -83,8 +117,14 @@ model Document {
   title          String
   type           String
   status         DocumentStatus @default(DRAFT)
+  pppType        PppDocumentType @default(OPINIA_PPP)
   specialistNotes String?
   generatedContent String?
+  templateId     String?
+  templateVersion String?
+  validationStatus ValidationStatus @default(NOT_VALIDATED)
+  validationReport Json?
+  learningDecision LearningDecision?
   childId        String
   userId         String
   organizationId String?
@@ -93,11 +133,15 @@ model Document {
 
   child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template DocumentTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   files UploadedFile[]
+  knowledgeExamples KnowledgeExample[]
 
   @@index([userId])
   @@index([childId])
   @@index([status])
+  @@index([pppType])
+  @@index([templateId])
 }
 
 model UploadedFile {
@@ -115,6 +159,59 @@ model UploadedFile {
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([documentId])
+  @@index([userId])
+}
+
+model DocumentTemplate {
+  id             String         @id @default(cuid())
+  name           String
+  type           PppDocumentType
+  version        String
+  status         TemplateStatus @default(ARCHIVED)
+  originalName   String
+  storedName     String
+  mimeType       String
+  size           Int
+  storagePath    String
+  extractedText  String
+  sections       Json
+  organizationId String?
+  userId         String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents    Document[]
+
+  @@unique([organizationId, type, version])
+  @@index([organizationId, type, status])
+  @@index([userId])
+}
+
+model KnowledgeExample {
+  id             String                 @id @default(cuid())
+  title          String
+  type           PppDocumentType
+  status         KnowledgeExampleStatus @default(SUPPORTING)
+  sourceDocumentId String?
+  originalName   String?
+  storedName     String?
+  mimeType       String?
+  size           Int?
+  storagePath    String?
+  extractedText  String
+  organizationId String?
+  userId         String
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceDocument Document?   @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, type, status])
+  @@index([sourceDocumentId])
   @@index([userId])
 }
 

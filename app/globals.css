@@ -436,6 +436,15 @@ h2 {
   font-weight: 700;
 }
 
+.inline-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .input,
 .textarea,
 .select {

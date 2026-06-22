@@ -13,12 +13,14 @@ type CreatedDocument = {
   id: string;
   title: string;
   generatedContent?: string | null;
+  validationStatus?: "NOT_VALIDATED" | "VALID" | "NEEDS_FIX";
 };
 
 export default function NewOpinionPage() {
   const [children, setChildren] = useState<ChildItem[]>([]);
   const [childId, setChildId] = useState("");
-  const [type, setType] = useState("Opinia psychologiczno-pedagogiczna");
+  const [pppType, setPppType] = useState("OPINIA_PPP");
+  const [type, setType] = useState("Opinia PPP");
   const [title, setTitle] = useState("");
   const [specialistNotes, setSpecialistNotes] = useState("");
   const [generatedContent, setGeneratedContent] = useState("");
@@ -44,6 +46,7 @@ export default function NewOpinionPage() {
         childId,
         title: title || type,
         type,
+        pppType,
         status: "DRAFT",
         specialistNotes,
         generatedContent,
@@ -69,7 +72,7 @@ export default function NewOpinionPage() {
     setMessage(response.ok ? "Plik został dodany do dokumentu." : "Nie udało się dodać pliku.");
   }
 
-  const steps = ["Dane dziecka", "Dokumenty źródłowe", "Uwagi specjalisty", "Generowanie", "Podgląd i zapis"];
+  const steps = ["Dane dziecka", "Typ i wzór", "Dokumenty źródłowe", "Generowanie", "Weryfikacja"];
   const currentStep = generatedContent ? 4 : specialistNotes ? 3 : file ? 1 : 0;
 
   return (
@@ -101,11 +104,19 @@ export default function NewOpinionPage() {
           </select>
         </div>
         <div className="field">
-          <label>Typ dokumentu/opinii</label>
-          <select className="select" value={type} onChange={(event) => setType(event.target.value)}>
-            <option>Opinia psychologiczno-pedagogiczna</option>
-            <option>Opinia o potrzebie objęcia pomocą</option>
-            <option>Informacja po diagnozie funkcjonalnej</option>
+          <label>Typ dokumentu PPP</label>
+          <select
+            className="select"
+            value={pppType}
+            onChange={(event) => {
+              setPppType(event.target.value);
+              setType(event.target.options[event.target.selectedIndex].text);
+            }}
+          >
+            <option value="KS">KS</option>
+            <option value="WWR">WWR</option>
+            <option value="OPINIA_PPP">Opinia PPP</option>
+            <option value="INNE">Inne</option>
           </select>
         </div>
         <div className="field">
@@ -120,6 +131,9 @@ export default function NewOpinionPage() {
           <Sparkles size={18} aria-hidden />
           Wygeneruj projekt i zapisz
         </button>
+        <p className="muted" style={{ fontSize: "12px" }}>
+          Generator użyje aktywnego wzoru dla wybranego typu. Bez aktywnego wzoru dokument zostanie oznaczony jako niewalidowany.
+        </p>
       </section>
 
       <section className="panel form">
@@ -137,6 +151,11 @@ export default function NewOpinionPage() {
           onChange={(event) => setGeneratedContent(event.target.value)}
           placeholder="Po wygenerowaniu tutaj pojawi się szkic dokumentu do ręcznej edycji."
         />
+        {createdDocument?.validationStatus ? (
+          <div className="alert">
+            Status zgodności ze wzorem: {createdDocument.validationStatus === "VALID" ? "zgodny" : createdDocument.validationStatus === "NEEDS_FIX" ? "wymaga poprawy" : "niezwalidowany"}
+          </div>
+        ) : null}
         <div className="field" style={{ marginTop: "16px" }}>
           <label>Załącz plik źródłowy po zapisaniu dokumentu</label>
           <div style={{ display: "flex", gap: "12px" }}>

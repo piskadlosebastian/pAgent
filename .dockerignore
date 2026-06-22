@@ -10,6 +10,10 @@ npm-debug.log
 !.env.production.example
 storage/uploads/*
 !storage/uploads/.gitkeep
+storage/templates/*
+!storage/templates/.gitkeep
+storage/examples/*
+!storage/examples/.gitkeep
 tsconfig.tsbuildinfo
 git
 main

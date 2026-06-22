@@ -28,6 +28,8 @@ services:
       - "3000"
     volumes:
       - pagent-uploads:/app/storage/uploads
+      - pagent-templates:/app/storage/templates
+      - pagent-examples:/app/storage/examples
     command: sh -c "npx prisma migrate deploy && npm run start"
 
   caddy:
@@ -48,5 +50,7 @@ services:
 volumes:
   pagent-postgres-data:
   pagent-uploads:
+  pagent-templates:
+  pagent-examples:
   caddy-data:
   caddy-config:

@@ -1,7 +1,8 @@
-import type { Child, UploadedFile } from "../generated/prisma/client";
+import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "../generated/prisma/client";
 import { getAiAgent, type AiAgentId } from "@/lib/ai-agents";
+import { asTemplateSections, composeFromTemplate, validateAgainstTemplate, type ValidationReport } from "@/lib/document-knowledge";
 
-export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś asystentem wspierającym tworzenie projektu opinii do Poradni Psychologiczno-Pedagogicznej. Twoim jedynym zadaniem jest przygotowanie projektu dokumentu na podstawie danych dziecka, załączonych dokumentów, notatek specjalisty oraz ustalonego wzoru opinii. Nie diagnozujesz samodzielnie. Nie dopisujesz faktów, których nie ma w materiałach. Jeżeli brakuje danych, wypisz je w sekcji "Brakujące informacje do uzupełnienia". Dokument musi być napisany językiem formalnym, profesjonalnym i zgodnym ze stylem dokumentacji PPP. Na końcu dodaj informację: "Dokument wymaga weryfikacji i zatwierdzenia przez uprawnionego specjalistę".`;
+export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś asystentem wspierającym tworzenie projektów dokumentów PPP. Najważniejsza zasada: wzór dokumentu jest nadrzędny wobec modelu AI. Nie wolno tworzyć własnej struktury dokumentu, dodawać nowych sekcji ani usuwać sekcji ze wzoru. Generujesz wyłącznie treść brakujących sekcji wskazanych w aktywnym wzorze. Nie diagnozujesz samodzielnie. Nie dopisujesz faktów, których nie ma w materiałach źródłowych, danych dziecka albo zweryfikowanych przykładach. Jeżeli brakuje danych, wpisz to w sekcji braków.`;
 
 // Moduł anonimizacji (struktura)
 export function anonymizeData(text: string, child: Child): string {
@@ -31,21 +32,41 @@ export async function generateOpinionDraft(input: {
   documentType: string;
   specialistNotes?: string | null;
   uploadedFiles?: UploadedFile[];
+  sourceTexts?: string[];
+  template?: DocumentTemplate | null;
+  similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   agentId?: string | null;
-}) {
-  const agent = getAiAgent(input.agentId);
-  if (agent.provider === "ollama") {
-    const generated = await generateWithOllama({
-      ...input,
-      agentId: agent.id
-    });
-    if (generated) return generated;
+}): Promise<{ content: string; validationReport?: ValidationReport }> {
+  if (!input.template) {
+    return { content: generateNoTemplateDraft(input) };
   }
 
-  return generateBuiltinOpinionDraft(input);
+  const agent = getAiAgent(input.agentId);
+  let aiSections: Record<string, string> | undefined;
+  if (agent.provider === "ollama") {
+    aiSections = (await generateWithOllama({
+      ...input,
+      agentId: agent.id
+    })) ?? undefined;
+  }
+
+  const content = composeFromTemplate({
+    template: input.template,
+    child: input.child,
+    documentType: input.documentType,
+    specialistNotes: input.specialistNotes,
+    sourceFiles: input.uploadedFiles,
+    similarExamples: input.similarExamples,
+    aiSections
+  });
+
+  return {
+    content,
+    validationReport: validateAgainstTemplate(content, input.template)
+  };
 }
 
-function generateBuiltinOpinionDraft(input: {
+function generateNoTemplateDraft(input: {
   child: Child;
   documentType: string;
   specialistNotes?: string | null;
@@ -70,7 +91,7 @@ function generateBuiltinOpinionDraft(input: {
     input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
     "",
     "Wstępny projekt treści",
-    "Niniejszy szkic stanowi uporządkowaną bazę do opracowania opinii. Treść wymaga uzupełnienia przez specjalistę na podstawie materiałów źródłowych, obserwacji oraz obowiązującego wzoru placówki.",
+    "Nie znaleziono aktywnego wzoru dla tego typu dokumentu. System nie powinien generować finalnej struktury bez wzoru. Dodaj aktywny wzór w module Wzory dokumentów i wygeneruj dokument ponownie.",
     "",
     "Brakujące informacje do uzupełnienia",
     missing.length ? missing.map((item) => `- ${item}`).join("\n") : "- brak na podstawie danych formularza",
@@ -86,6 +107,9 @@ async function generateWithOllama(input: {
   documentType: string;
   specialistNotes?: string | null;
   uploadedFiles?: UploadedFile[];
+  sourceTexts?: string[];
+  template?: DocumentTemplate | null;
+  similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   agentId: AiAgentId;
 }) {
   const agent = getAiAgent(input.agentId);
@@ -113,7 +137,7 @@ async function generateWithOllama(input: {
 
     if (!response.ok) return null;
     const data = (await response.json()) as { response?: string };
-    return data.response?.trim() || null;
+    return parseSectionJson(data.response);
   } catch {
     return null;
   } finally {
@@ -126,9 +150,17 @@ function buildOpinionPrompt(input: {
   documentType: string;
   specialistNotes?: string | null;
   uploadedFiles?: UploadedFile[];
+  sourceTexts?: string[];
+  template?: DocumentTemplate | null;
+  similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
 }) {
+  const sections = input.template ? asTemplateSections(input.template.sections) : [];
   return [
     `Typ dokumentu: ${input.documentType}`,
+    input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "Aktywny wzór: brak",
+    "",
+    "Sekcje wzoru, których nie wolno zmieniać:",
+    sections.map((section) => `- ${section.title}`).join("\n") || "brak",
     "",
     "Dane dziecka:",
     `- Imię i nazwisko: ${input.child.firstName} ${input.child.lastName}`,
@@ -140,7 +172,29 @@ function buildOpinionPrompt(input: {
     "",
     `Uwagi specjalisty: ${input.specialistNotes || "brak"}`,
     `Załączone pliki źródłowe: ${input.uploadedFiles?.length || 0}`,
+    ...(input.sourceTexts?.length ? ["", "Fragmenty dokumentów źródłowych:", input.sourceTexts.join("\n---\n")] : []),
+    ...(input.similarExamples?.length
+      ? ["", "Zweryfikowane przykłady wzorcowe RAG:", input.similarExamples.map((example) => `# ${example.title}\n${example.extractedText.slice(0, 2400)}`).join("\n---\n")]
+      : []),
     "",
-    "Przygotuj projekt opinii PPP. Nie twórz diagnozy. Nie dopisuj faktów spoza danych. Jeżeli brakuje informacji, wypisz je w sekcji braków."
+    "Zwróć wyłącznie JSON w formacie: {\"Nazwa sekcji\":\"treść sekcji\"}. Kluczami mogą być tylko nazwy sekcji z listy wzoru. Nie zwracaj pełnego dokumentu, nie dodawaj nowych sekcji."
   ].join("\n");
+}
+
+function parseSectionJson(response?: string | null) {
+  if (!response) return undefined;
+  const start = response.indexOf("{");
+  const end = response.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return undefined;
+  try {
+    const parsed = JSON.parse(response.slice(start, end + 1));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+        .map(([key, value]) => [key, value.trim()])
+    );
+  } catch {
+    return undefined;
+  }
 }
