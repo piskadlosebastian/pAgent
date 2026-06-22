@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pagent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pagent
+      POSTGRES_USER: pagent
+      POSTGRES_PASSWORD: pagent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pagent-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  pagent-postgres-data:

@@ -1,0 +1,134 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum DocumentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  ARCHIVED
+}
+
+model Organization {
+  id             String   @id @default(cuid())
+  name           String
+  address        String?
+  documentFooter String?
+  aiConfigNote   String?
+  aiProvider     String?  @default("pagent_builtin")
+  aiModel        String?
+  aiApiUrl       String?
+  aiApiKey       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users User[]
+}
+
+model User {
+  id             String        @id @default(cuid())
+  email          String        @unique
+  name           String?
+  passwordHash   String
+  role           Role          @default(USER)
+  organizationId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  children     Child[]
+  documents    Document[]
+  uploadedFiles UploadedFile[]
+  auditLogs    AuditLog[]
+}
+
+model Child {
+  id             String   @id @default(cuid())
+  firstName      String
+  lastName       String
+  birthDate      DateTime
+  school         String?
+  classGroup     String?
+  guardians      String?
+  notes          String?
+  userId         String
+  organizationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@index([userId])
+  @@index([lastName, firstName])
+}
+
+model Document {
+  id             String         @id @default(cuid())
+  title          String
+  type           String
+  status         DocumentStatus @default(DRAFT)
+  specialistNotes String?
+  generatedContent String?
+  childId        String
+  userId         String
+  organizationId String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  files UploadedFile[]
+
+  @@index([userId])
+  @@index([childId])
+  @@index([status])
+}
+
+model UploadedFile {
+  id             String   @id @default(cuid())
+  originalName   String
+  storedName     String
+  mimeType       String
+  size           Int
+  storagePath    String
+  documentId     String
+  userId         String
+  createdAt      DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  userId    String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entity, entityId])
+}

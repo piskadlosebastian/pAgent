@@ -1,0 +1,12 @@
+.git
+.next
+generated
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+!.env.production.example
+storage/uploads/*
+!storage/uploads/.gitkeep
+tsconfig.tsbuildinfo
