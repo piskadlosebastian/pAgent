@@ -1,34 +1,28 @@
-# Wdrożenie pAgent na GitHub i VPS
+# Wdrożenie pAgent na VPS
 
-## 1. Przygotowanie GitHub
+Docelowy adres aplikacji: `https://pagent.nexurio.pl`.
 
-Utwórz puste repozytorium na GitHubie, np. `pAgent`.
+## 1. DNS
 
-W katalogu projektu uruchom:
+W panelu DNS domeny `nexurio.pl` dodaj rekord:
 
-```bash
-git init
-git add .
-git commit -m "Initial pAgent application"
-git branch -M main
-git remote add origin https://github.com/TWOJ_LOGIN/pAgent.git
-git push -u origin main
+```text
+Typ: A
+Nazwa/Host: pagent
+Wartość: IP_TWOJEGO_VPS
+TTL: 300 albo domyślne
 ```
 
-Nie dodawaj do repo plików `.env` ani `.env.production`. Są ignorowane przez `.gitignore`.
+Jeśli używasz IPv6, możesz dodać także rekord `AAAA`.
 
 ## 2. Przygotowanie VPS
 
-Na VPS zainstaluj:
-
-- Docker
-- Docker Compose
-- Git
+Na VPS zainstaluj Docker, Docker Compose i Git.
 
 Sklonuj repozytorium:
 
 ```bash
-git clone https://github.com/TWOJ_LOGIN/pAgent.git
+git clone https://github.com/piskadlosebastian/pAgent.git
 cd pAgent
 ```
 
@@ -39,50 +33,50 @@ cp .env.production.example .env.production
 nano .env.production
 ```
 
-Ustaw mocne wartości:
+W `.env.production` ustaw:
 
-- `POSTGRES_PASSWORD`
-- `DATABASE_URL` z tym samym hasłem
-- `NEXTAUTH_URL`, np. `https://twoja-domena.pl`
-- `NEXTAUTH_SECRET`
+- `APP_DOMAIN="pagent.nexurio.pl"`
+- `NEXTAUTH_URL="https://pagent.nexurio.pl"`
+- mocne `POSTGRES_PASSWORD`
+- `DATABASE_URL` z tym samym hasłem bazy
+- mocne `NEXTAUTH_SECRET`
 - `ADMIN_EMAIL`
-- `ADMIN_PASSWORD`
+- mocne `ADMIN_PASSWORD`
 
-Sekret możesz wygenerować poleceniem:
+Sekret wygenerujesz tak:
 
 ```bash
 openssl rand -base64 32
 ```
 
-## 3. Start aplikacji
+## 3. Firewall
+
+Otwórz porty:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow OpenSSH
+sudo ufw enable
+```
+
+Jeżeli VPS ma inny firewall w panelu dostawcy, tam też otwórz `80` i `443`.
+
+## 4. Start aplikacji
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
 ```
 
-Seed konta administratora wykonaj po pierwszym starcie:
+Seed konta administratora po pierwszym starcie:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml exec app npm run prisma:seed
 ```
 
-Aplikacja będzie dostępna na porcie `3000`.
+Caddy automatycznie pobierze certyfikat HTTPS dla `pagent.nexurio.pl`, jeśli DNS wskazuje na VPS i porty `80/443` są otwarte.
 
-## 4. Reverse proxy i HTTPS
-
-Najprościej wystawić aplikację za Caddy albo Nginx.
-
-Przykład Caddy:
-
-```caddyfile
-twoja-domena.pl {
-  reverse_proxy 127.0.0.1:3000
-}
-```
-
-Po ustawieniu domeny pamiętaj, aby `NEXTAUTH_URL` w `.env.production` było dokładnie adresem produkcyjnym, np. `https://twoja-domena.pl`.
-
-## 5. Aktualizacja aplikacji na VPS
+## 5. Aktualizacja aplikacji
 
 ```bash
 git pull
@@ -96,6 +90,7 @@ Migracje Prisma wykonują się automatycznie przy starcie kontenera aplikacji.
 Najważniejsze dane:
 
 - baza PostgreSQL w wolumenie `pagent-postgres-data`,
-- załączniki w wolumenie `pagent-uploads`.
+- załączniki w wolumenie `pagent-uploads`,
+- certyfikaty Caddy w wolumenach `caddy-data` i `caddy-config`.
 
 Przed większymi zmianami wykonuj backup bazy i uploadów.
