@@ -14,6 +14,8 @@ export const PPP_DOCUMENT_TYPES: { value: PppDocumentType; label: string }[] = [
 export type TemplateSection = {
   title: string;
   required: boolean;
+  marker?: "TEKST";
+  occurrence?: number;
 };
 
 export type ValidationReport = {
@@ -98,6 +100,9 @@ export async function extractPlainText(storagePath: string, mimeType?: string | 
 
 export function extractTemplateSections(text: string): TemplateSection[] {
   const lines = normalizeText(text).split("\n");
+  const textMarkerSections = extractTextMarkerSections(lines);
+  if (textMarkerSections.length) return textMarkerSections;
+
   const sections: TemplateSection[] = [];
 
   for (const line of lines) {
@@ -213,9 +218,11 @@ export function validateAgainstTemplate(content: string, template: Pick<Document
 export function asTemplateSections(value: unknown): TemplateSection[] {
   if (Array.isArray(value)) {
     return value
-      .map((item) => ({
+      .map((item): TemplateSection => ({
         title: typeof item?.title === "string" ? item.title : "",
-        required: item?.required !== false
+        required: item?.required !== false,
+        marker: item?.marker === "TEKST" ? "TEKST" as const : undefined,
+        occurrence: typeof item?.occurrence === "number" ? item.occurrence : undefined
       }))
       .filter((item) => item.title);
   }
@@ -266,6 +273,11 @@ function builtinSectionContent(sectionTitle: string, input: {
 function fillTemplateText(templateText: string, sections: TemplateSection[], sectionContent: Record<string, string>) {
   let output = normalizeText(templateText);
   let replacedPlaceholder = false;
+  const textMarkerSections = sections.filter((section) => section.marker === "TEKST");
+
+  if (textMarkerSections.length) {
+    return fillTextMarkers(output, textMarkerSections, sectionContent);
+  }
 
   for (const section of sections) {
     const content = sectionContent[section.title];
@@ -307,6 +319,56 @@ function fillTemplateText(templateText: string, sections: TemplateSection[], sec
   }
 
   return normalizeText(lines.join("\n"));
+}
+
+function extractTextMarkerSections(lines: string[]): TemplateSection[] {
+  const sections: TemplateSection[] = [];
+  let occurrence = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!isTextMarker(lines[index])) continue;
+    occurrence += 1;
+    const instruction = findNearestInstructionAbove(lines, index) ?? `Pole TEKST ${occurrence}`;
+    sections.push({
+      title: `${instruction} [TEKST ${occurrence}]`,
+      required: true,
+      marker: "TEKST",
+      occurrence
+    });
+  }
+
+  return sections;
+}
+
+function fillTextMarkers(templateText: string, sections: TemplateSection[], sectionContent: Record<string, string>) {
+  const lines = templateText.split("\n");
+  let occurrence = 0;
+
+  return normalizeText(
+    lines
+      .map((line) => {
+        if (!isTextMarker(line)) return line;
+        occurrence += 1;
+        const section = sections.find((item) => item.occurrence === occurrence);
+        const content = section ? sectionContent[section.title] : "";
+        return content || "Brak danych w załączonych materiałach - do uzupełnienia przez specjalistę";
+      })
+      .join("\n")
+  );
+}
+
+function isTextMarker(line: string) {
+  return line.trim().toUpperCase() === "TEKST";
+}
+
+function findNearestInstructionAbove(lines: string[], textIndex: number) {
+  for (let index = textIndex - 1; index >= 0; index -= 1) {
+    const candidate = lines[index].trim();
+    if (!candidate || isTextMarker(candidate)) continue;
+    if (candidate.length > 240) continue;
+    return candidate.replace(/\s+/g, " ");
+  }
+  return null;
 }
 
 function isEmptyTemplateBody(body: string) {
