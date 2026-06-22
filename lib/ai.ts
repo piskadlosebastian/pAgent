@@ -1,41 +1,22 @@
 import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "../generated/prisma/client";
-import { getAiAgent, type AiAgentId } from "@/lib/ai-agents";
-import { asTemplateSections, composeFromTemplate, validateAgainstTemplate, type ValidationReport } from "@/lib/document-knowledge";
+import { getAiAgent, type AiAgentDefinition, type AiAgentId } from "@/lib/ai-agents";
+import { asTemplateSections, composeFromTemplate, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
 
-export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś asystentem PPP do opracowywania projektów KS, WWR i opinii PPP. Zasada nadrzędna: aktywny wzór dokumentu jest ważniejszy niż model AI. Nie wolno Ci tworzyć własnego układu dokumentu, zmieniać kolejności sekcji, dodawać nowych sekcji ani usuwać sekcji ze wzoru. Twoja rola polega wyłącznie na wypełnieniu treści sekcji wskazanych przez system.
+export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś specjalistycznym asystentem do przygotowywania projektów opinii WWR w aplikacji pAgent. Twoim jedynym zadaniem jest wypełnienie obowiązującego wzoru dokumentu na podstawie dokumentów źródłowych. Wzór dokumentu jest nadrzędny i nie wolno zmieniać jego struktury. Wypełniaj wyłącznie miejsca oznaczone jako "tekst" lub "Tekst". Każde pole wypełniaj osobno, zgodnie z pytaniem lub zagadnieniem znajdującym się bezpośrednio przed tym polem. Nie kopiuj całych dokumentów źródłowych. Nie powtarzaj tych samych akapitów w różnych sekcjach. Nie twórz diagnoz ani faktów, których nie ma w materiałach. Jeśli brakuje danych, wpisz: "Brak danych w załączonych materiałach." Pisz językiem formalnym, rzeczowym i zgodnym ze stylem dokumentacji poradni psychologiczno-pedagogicznej.`;
 
-Pracuj wyłącznie na faktach z:
-1. danych dziecka,
-2. załączonych dokumentów źródłowych, np. wyników badań,
-3. notatek specjalisty,
-4. zweryfikowanych przykładów wzorcowych.
-
-Nie diagnozuj samodzielnie. Nie twórz hipotez. Nie dopisuj wyników, trudności, zaleceń ani rozpoznań, których nie ma w materiałach źródłowych. Jeżeli dla sekcji brakuje danych, wpisz krótko: "Brak danych w załączonych materiałach - do uzupełnienia przez specjalistę". Styl ma być formalny, uporządkowany i zgodny z dokumentacją PPP.
-
-System wklei Twoje odpowiedzi do aktywnego wzoru. Dlatego odpowiedzi muszą być samą treścią sekcji, bez nazw sekcji, bez numerowania, bez komentarzy i bez nowego układu dokumentu.
-
-Jeżeli we wzorze występuje marker "TEKST", traktuj go jako dokładne miejsce do wklejenia opisu. Nazwa pola w JSON będzie zawierała punkt lub podpunkt znajdujący się bezpośrednio nad markerem oraz oznaczenie [TEKST n]. Dla takiego pola odpowiedz wyłącznie na temat tego konkretnego punktu lub podpunktu, korzystając z załączonych dokumentów źródłowych.`;
-
-// Moduł anonimizacji (struktura)
 export function anonymizeData(text: string, child: Child): string {
-  // TODO: Pełna implementacja anonimizacji
-  // Zastępowanie imienia, nazwiska, szkoły, daty urodzenia itp.
-  // np. Jan Kowalski -> [DZIECKO_1]
   let anonymized = text;
   if (child.firstName) anonymized = anonymized.replaceAll(child.firstName, "[DZIECKO_1]");
   if (child.lastName) anonymized = anonymized.replaceAll(child.lastName, "[NAZWISKO_1]");
   if (child.school) anonymized = anonymized.replaceAll(child.school, "[SZKOŁA_1]");
-  // ...
   return anonymized;
 }
 
 export function deanonymizeData(text: string, child: Child): string {
-  // TODO: Pełna implementacja deanonimizacji
   let deanonymized = text;
   if (child.firstName) deanonymized = deanonymized.replaceAll("[DZIECKO_1]", child.firstName);
   if (child.lastName) deanonymized = deanonymized.replaceAll("[NAZWISKO_1]", child.lastName);
   if (child.school) deanonymized = deanonymized.replaceAll("[SZKOŁA_1]", child.school);
-  // ...
   return deanonymized;
 }
 
@@ -54,15 +35,15 @@ export async function generateOpinionDraft(input: {
   }
 
   const agent = getAiAgent(input.agentId);
+  const sections = asTemplateSections(input.template.sections);
   let aiSections: Record<string, string> | undefined;
+
   if (agent.provider === "ollama") {
-    aiSections = (await generateWithOllama({
-      ...input,
-      agentId: agent.id
-    })) ?? undefined;
+    aiSections = await generateFieldsWithOllama(input, sections, agent);
   }
+
   if (agent.provider === "dify") {
-    aiSections = (await generateWithDify(input)) ?? undefined;
+    aiSections = await generateFieldsWithDify(input, sections);
   }
 
   const content = composeFromTemplate({
@@ -85,84 +66,106 @@ export async function generateOpinionDraft(input: {
 function generateNoTemplateDraft(input: {
   child: Child;
   documentType: string;
-  specialistNotes?: string | null;
   uploadedFiles?: UploadedFile[];
 }) {
-  const missing: string[] = [];
-  if (!input.child.school) missing.push("szkoła lub przedszkole");
-  if (!input.child.guardians) missing.push("dane rodziców/opiekunów");
-
   return [
-    `Projekt opinii PPP - ${input.documentType}`,
+    `Projekt dokumentu - ${input.documentType}`,
     "",
-    `Dane dziecka: ${input.child.firstName} ${input.child.lastName}`,
+    `Dziecko: ${input.child.firstName} ${input.child.lastName}`,
     `Data urodzenia: ${input.child.birthDate.toISOString().slice(0, 10)}`,
-    input.child.school ? `Placówka: ${input.child.school}` : "",
-    input.child.classGroup ? `Klasa/grupa: ${input.child.classGroup}` : "",
     "",
-    "Podstawa opracowania",
-    input.uploadedFiles?.length
-      ? `Uwzględniono ${input.uploadedFiles.length} załączonych plików źródłowych.`
-      : "Na tym etapie nie dodano plików źródłowych.",
-    input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
-    "",
-    "Wstępny projekt treści",
-    "Nie znaleziono aktywnego wzoru dla tego typu dokumentu. System nie powinien generować finalnej struktury bez wzoru. Dodaj aktywny wzór w module Wzory dokumentów i wygeneruj dokument ponownie.",
-    "",
-    "Brakujące informacje do uzupełnienia",
-    missing.length ? missing.map((item) => `- ${item}`).join("\n") : "- brak na podstawie danych formularza",
-    "",
-    "Dokument wymaga weryfikacji i zatwierdzenia przez uprawnionego specjalistę"
-  ]
-    .filter(Boolean)
-    .join("\n");
+    "Brak aktywnego wzoru dla wybranego typu dokumentu. Dodaj aktywny wzór i wygeneruj dokument ponownie."
+  ].join("\n");
 }
 
-async function generateWithDify(input: {
-  child: Child;
-  documentType: string;
-  specialistNotes?: string | null;
-  uploadedFiles?: UploadedFile[];
-  sourceTexts?: string[];
-  template?: DocumentTemplate | null;
-  similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
-}) {
+async function generateFieldsWithOllama(input: GenerationInput, sections: TemplateSection[], agent: AiAgentDefinition) {
+  if (!agent.endpoint || !agent.model) return undefined;
+  const output: Record<string, string> = {};
+
+  for (const section of sections) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+
+    try {
+      const response = await fetch(agent.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: agent.model,
+          stream: false,
+          system: PPP_AGENT_SYSTEM_PROMPT,
+          prompt: buildFieldPrompt(input, section),
+          options: {
+            temperature: 0.05,
+            top_p: 0.8,
+            repeat_penalty: 1.18
+          }
+        })
+      });
+
+      if (!response.ok) {
+        output[section.title] = "Brak danych w załączonych materiałach.";
+      } else {
+        const data = (await response.json()) as { response?: string };
+        output[section.title] = sanitizeFieldAnswer(data.response);
+      }
+    } catch {
+      output[section.title] = "Brak danych w załączonych materiałach.";
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return output;
+}
+
+async function generateFieldsWithDify(input: GenerationInput, sections: TemplateSection[]) {
   const apiUrl = process.env.DIFY_API_URL;
   const apiKey = process.env.DIFY_API_KEY;
-  if (!apiUrl || !apiKey) return null;
+  if (!apiUrl || !apiKey) return undefined;
+  const output: Record<string, string> = {};
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90_000);
+  for (const section of sections) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90_000);
 
-  try {
-    const response = await fetch(`${apiUrl.replace(/\/$/, "")}/chat-messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        inputs: {
-          documentType: input.documentType,
-          templateSections: input.template ? JSON.stringify(asTemplateSections(input.template.sections)) : "[]"
+    try {
+      const response = await fetch(`${apiUrl.replace(/\/$/, "")}/chat-messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
         },
-        query: buildOpinionPrompt(input),
-        response_mode: "blocking",
-        user: input.child.id
-      })
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { answer?: string };
-    return parseSectionJson(data.answer);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
+        signal: controller.signal,
+        body: JSON.stringify({
+          inputs: {
+            documentType: input.documentType,
+            fieldName: section.title
+          },
+          query: buildFieldPrompt(input, section),
+          response_mode: "blocking",
+          user: input.child.id
+        })
+      });
+
+      if (!response.ok) {
+        output[section.title] = "Brak danych w załączonych materiałach.";
+      } else {
+        const data = (await response.json()) as { answer?: string };
+        output[section.title] = sanitizeFieldAnswer(data.answer);
+      }
+    } catch {
+      output[section.title] = "Brak danych w załączonych materiałach.";
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+
+  return output;
 }
 
-async function generateWithOllama(input: {
+type GenerationInput = {
   child: Child;
   documentType: string;
   specialistNotes?: string | null;
@@ -170,60 +173,19 @@ async function generateWithOllama(input: {
   sourceTexts?: string[];
   template?: DocumentTemplate | null;
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
-  agentId: AiAgentId;
-}) {
-  const agent = getAiAgent(input.agentId);
-  if (!agent.endpoint || !agent.model) return null;
+  agentId?: string | null;
+};
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
-
-  try {
-    const response = await fetch(agent.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: agent.model,
-        stream: false,
-        system: PPP_AGENT_SYSTEM_PROMPT,
-        prompt: buildOpinionPrompt(input),
-        options: {
-          temperature: 0.1,
-          top_p: 0.9
-        }
-      })
-    });
-
-    if (!response.ok) return null;
-    const data = (await response.json()) as { response?: string };
-    return parseSectionJson(data.response);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function buildOpinionPrompt(input: {
-  child: Child;
-  documentType: string;
-  specialistNotes?: string | null;
-  uploadedFiles?: UploadedFile[];
-  sourceTexts?: string[];
-  template?: DocumentTemplate | null;
-  similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
-}) {
-  const sections = input.template ? asTemplateSections(input.template.sections) : [];
+function buildFieldPrompt(input: GenerationInput, section: TemplateSection) {
   return [
     `Typ dokumentu: ${input.documentType}`,
-    input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "Aktywny wzór: brak",
+    input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "",
     "",
-    "Wzór dokumentu jest obowiązkowy. System wklei Twoje odpowiedzi do poniższego wzoru. Nie odtwarzaj całego wzoru w odpowiedzi:",
-    input.template?.extractedText.slice(0, 7000) || "brak",
-    "",
-    "Pola wzoru do wypełnienia. Jeżeli nazwa zawiera [TEKST n], oznacza to miejsce po słowie TEKST w aktywnym wzorze; odpowiedz dokładnie na temat punktu/podpunktu poprzedzającego ten marker:",
-    sections.map((section) => `- ${section.title}`).join("\n") || "brak",
+    "Wypełniasz dokładnie jedno miejsce oznaczone w aktywnym wzorze jako tekst/Tekst/- tekst.",
+    `Nazwa pola: ${section.title}`,
+    section.parentHeading ? `Sekcja główna: ${section.parentHeading}` : "",
+    section.pointNumber ? `Numer punktu/podpunktu: ${section.pointNumber}` : "",
+    `Pytanie lub zagadnienie bezpośrednio przed polem: ${section.instruction ?? section.title}`,
     "",
     "Dane dziecka:",
     `- Imię i nazwisko: ${input.child.firstName} ${input.child.lastName}`,
@@ -233,33 +195,41 @@ function buildOpinionPrompt(input: {
     `- Rodzice/opiekunowie: ${input.child.guardians || "brak"}`,
     `- Notatki w bazie dziecka: ${input.child.notes || "brak"}`,
     "",
-    `Uwagi specjalisty: ${input.specialistNotes || "brak"}`,
-    `Załączone pliki źródłowe: ${input.uploadedFiles?.length || 0}`,
-    ...(input.sourceTexts?.length
-      ? ["", "DOKUMENTY ŹRÓDŁOWE DO WYKORZYSTANIA. Wnioski i opisy mają wynikać z poniższych materiałów:", input.sourceTexts.join("\n---\n").slice(0, 14000)]
-      : ["", "DOKUMENTY ŹRÓDŁOWE DO WYKORZYSTANIA: brak odczytanego tekstu z załączników. Nie wolno wymyślać wyników badań."]),
-    ...(input.similarExamples?.length
-      ? ["", "Zweryfikowane przykłady wzorcowe RAG:", input.similarExamples.map((example) => `# ${example.title}\n${example.extractedText.slice(0, 2400)}`).join("\n---\n")]
-      : []),
+    input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
     "",
-    "Zwróć wyłącznie JSON w formacie: {\"Nazwa pola z listy\":\"treść do wklejenia w miejsce TEKST albo w sekcję wzoru\"}. Kluczami mogą być tylko dokładne nazwy pól z listy. Nie zwracaj pełnego dokumentu. Nie dodawaj wstępów, komentarzy, markdown ani nowych nagłówków. Każda wartość JSON ma być gotowym opisem danego punktu/podpunktu, bez powtarzania nazwy pola."
-  ].join("\n");
+    input.sourceTexts?.length
+      ? `Wybrane dokumenty źródłowe:\n${input.sourceTexts.join("\n---\n").slice(0, 10_000)}`
+      : "Dokumenty źródłowe: brak odczytanego tekstu.",
+    "",
+    input.similarExamples?.length
+      ? `Przykłady stylu, tylko pomocniczo:\n${input.similarExamples.map((example) => example.extractedText.slice(0, 1200)).join("\n---\n")}`
+      : "",
+    "",
+    "Instrukcja odpowiedzi:",
+    "- odpowiedz tylko na to jedno zagadnienie;",
+    "- nie kopiuj całych dokumentów źródłowych;",
+    "- nie powtarzaj informacji, które pasują do innych pól;",
+    "- nie dodawaj nagłówków, numerów punktów, komentarzy technicznych ani instrukcji dla AI;",
+    "- nie używaj fraz: Materiał źródłowy, Brak przykładów wzorcowych, Treść wymaga uzupełnienia, Plik ...;",
+    "- jeśli materiały nie zawierają danych dla tego pola, zwróć dokładnie: Brak danych w załączonych materiałach.",
+    "",
+    "Zwróć wyłącznie treść do wklejenia w miejsce tekst/Tekst."
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function parseSectionJson(response?: string | null) {
-  if (!response) return undefined;
-  const start = response.indexOf("{");
-  const end = response.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return undefined;
-  try {
-    const parsed = JSON.parse(response.slice(start, end + 1));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    return Object.fromEntries(
-      Object.entries(parsed)
-        .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
-        .map(([key, value]) => [key, value.trim()])
-    );
-  } catch {
-    return undefined;
-  }
+function sanitizeFieldAnswer(answer?: string | null) {
+  const cleaned = (answer ?? "")
+    .replace(/^```(?:json|text)?/i, "")
+    .replace(/```$/i, "")
+    .replace(/^(odpowiedź|treść|opis)\s*:\s*/i, "")
+    .replace(/Materia[lł] źródłowy[^.\n]*(\.|\n)?/gi, "")
+    .replace(/Brak przykładów wzorcowych[^.\n]*(\.|\n)?/gi, "")
+    .replace(/Treść wymaga uzupełnienia[^.\n]*(\.|\n)?/gi, "")
+    .replace(/^Plik\s+[^:\n]+:\s*/gim, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return cleaned || "Brak danych w załączonych materiałach.";
 }

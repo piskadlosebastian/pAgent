@@ -16,6 +16,9 @@ export type TemplateSection = {
   required: boolean;
   marker?: "TEKST";
   occurrence?: number;
+  instruction?: string;
+  parentHeading?: string;
+  pointNumber?: string;
 };
 
 export type ValidationReport = {
@@ -23,6 +26,9 @@ export type ValidationReport = {
   missingSections: string[];
   addedSections: string[];
   emptyRequiredFields: string[];
+  remainingPlaceholders: string[];
+  repeatedParagraphs: string[];
+  forbiddenPhrases: string[];
 };
 
 export function normalizePppType(value?: string | null): PppDocumentType {
@@ -190,28 +196,45 @@ export function composeFromTemplate(input: {
 export function validateAgainstTemplate(content: string, template: Pick<DocumentTemplate, "sections">): ValidationReport {
   const sections = asTemplateSections(template.sections);
   const contentLines = normalizeText(content).split("\n").map((line) => line.trim()).filter(Boolean);
+  const isMarkerTemplate = sections.some((section) => section.marker === "TEKST");
   const missingSections = sections
+    .filter(() => !isMarkerTemplate)
     .filter((section) => !contentLines.some((line) => sameHeading(line, section.title)))
     .map((section) => section.title);
   const allowedTitles = new Set(sections.map((section) => section.title.toLowerCase()));
-  const addedSections = contentLines
-    .filter((line) => isLikelyHeading(line))
-    .map((line) => line.replace(/^\d+[\).\s-]+/, "").trim())
-    .filter((line) => !allowedTitles.has(line.toLowerCase()))
-    .filter((line) => !["dokument wymaga weryfikacji i zatwierdzenia przez uprawnionego specjalistę"].includes(line.toLowerCase()));
+  const addedSections = isMarkerTemplate
+    ? []
+    : contentLines
+        .filter((line) => isLikelyHeading(line))
+        .map((line) => line.replace(/^\d+[\).\s-]+/, "").trim())
+        .filter((line) => !allowedTitles.has(line.toLowerCase()))
+        .filter((line) => !["dokument wymaga weryfikacji i zatwierdzenia przez uprawnionego specjalistę"].includes(line.toLowerCase()));
   const emptyRequiredFields = sections
+    .filter(() => !isMarkerTemplate)
     .filter((section) => section.required)
     .filter((section) => {
       const body = getSectionBody(content, section.title, sections.map((item) => item.title));
       return body.trim().length < 8 || /\{\{[^}]+\}\}/.test(body);
     })
     .map((section) => section.title);
+  const remainingPlaceholders = contentLines.filter((line) => isTextMarker(line) || /\{\{[^}]+\}\}/.test(line));
+  const repeatedParagraphs = findRepeatedParagraphs(content);
+  const forbiddenPhrases = findForbiddenPhrases(content);
 
   return {
-    valid: missingSections.length === 0 && addedSections.length === 0 && emptyRequiredFields.length === 0,
+    valid:
+      missingSections.length === 0 &&
+      addedSections.length === 0 &&
+      emptyRequiredFields.length === 0 &&
+      remainingPlaceholders.length === 0 &&
+      repeatedParagraphs.length === 0 &&
+      forbiddenPhrases.length === 0,
     missingSections,
     addedSections: [...new Set(addedSections)],
-    emptyRequiredFields
+    emptyRequiredFields,
+    remainingPlaceholders,
+    repeatedParagraphs,
+    forbiddenPhrases
   };
 }
 
@@ -222,7 +245,10 @@ export function asTemplateSections(value: unknown): TemplateSection[] {
         title: typeof item?.title === "string" ? item.title : "",
         required: item?.required !== false,
         marker: item?.marker === "TEKST" ? "TEKST" as const : undefined,
-        occurrence: typeof item?.occurrence === "number" ? item.occurrence : undefined
+        occurrence: typeof item?.occurrence === "number" ? item.occurrence : undefined,
+        instruction: typeof item?.instruction === "string" ? item.instruction : undefined,
+        parentHeading: typeof item?.parentHeading === "string" ? item.parentHeading : undefined,
+        pointNumber: typeof item?.pointNumber === "string" ? item.pointNumber : undefined
       }))
       .filter((item) => item.title);
   }
@@ -261,13 +287,11 @@ function builtinSectionContent(sectionTitle: string, input: {
     ? `Styl sekcji powinien być zgodny ze zweryfikowanymi przykładami: ${input.similarExamples.map((item) => item.title).join(", ")}.`
     : "Brak przykładów wzorcowych dla tej kategorii.";
   const sourceNote = input.sourceTexts?.length
-    ? `Materiał źródłowy do opracowania tej sekcji:\n${input.sourceTexts.join("\n---\n").slice(0, 3500)}`
-    : "Brak odczytanego tekstu z dokumentów źródłowych dla tej sekcji.";
-  return [
-    sourceNote,
-    input.specialistNotes ? `Materiał specjalisty: ${input.specialistNotes}` : "Treść wymaga uzupełnienia na podstawie materiałów źródłowych.",
-    exampleNote
-  ].join("\n");
+    ? summarizeSourceForFallback(input.sourceTexts.join(" ").slice(0, 900))
+    : "Brak danych w załączonych materiałach.";
+  return [sourceNote, input.specialistNotes || "", exampleNote === "Brak przykładów wzorcowych dla tej kategorii." ? "" : exampleNote]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function fillTemplateText(templateText: string, sections: TemplateSection[], sectionContent: Record<string, string>) {
@@ -328,12 +352,17 @@ function extractTextMarkerSections(lines: string[]): TemplateSection[] {
   for (let index = 0; index < lines.length; index += 1) {
     if (!isTextMarker(lines[index])) continue;
     occurrence += 1;
-    const instruction = findNearestInstructionAbove(lines, index) ?? `Pole TEKST ${occurrence}`;
+    const instruction = findNearestInstructionAbove(lines, index) ?? `Pole tekst ${occurrence}`;
+    const parentHeading = findParentHeadingAbove(lines, index, instruction);
+    const pointNumber = extractPointNumber(instruction);
     sections.push({
       title: `${instruction} [TEKST ${occurrence}]`,
       required: true,
       marker: "TEKST",
-      occurrence
+      occurrence,
+      instruction,
+      parentHeading,
+      pointNumber
     });
   }
 
@@ -358,7 +387,7 @@ function fillTextMarkers(templateText: string, sections: TemplateSection[], sect
 }
 
 function isTextMarker(line: string) {
-  return line.trim().toUpperCase() === "TEKST";
+  return /^-?\s*tekst\s*$/i.test(line.trim());
 }
 
 function findNearestInstructionAbove(lines: string[], textIndex: number) {
@@ -369,6 +398,45 @@ function findNearestInstructionAbove(lines: string[], textIndex: number) {
     return candidate.replace(/\s+/g, " ");
   }
   return null;
+}
+
+function findParentHeadingAbove(lines: string[], textIndex: number, instruction: string) {
+  for (let index = textIndex - 1; index >= 0; index -= 1) {
+    const candidate = lines[index].trim();
+    if (!candidate || candidate === instruction || isTextMarker(candidate)) continue;
+    const isMainHeading = candidate.length <= 100 && (candidate === candidate.toUpperCase() || /^\d+[\).]\s+\S/.test(candidate));
+    if (isMainHeading) return candidate.replace(/\s+/g, " ");
+  }
+  return undefined;
+}
+
+function extractPointNumber(text: string) {
+  return text.match(/^((?:\d+[\).]\s*)+(?:[a-z]\))?)/i)?.[1]?.trim();
+}
+
+function summarizeSourceForFallback(text: string) {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "Brak danych w załączonych materiałach.";
+  return cleaned.length > 700 ? `${cleaned.slice(0, 700).trim()}...` : cleaned;
+}
+
+function findRepeatedParagraphs(content: string) {
+  const counts = new Map<string, number>();
+  for (const paragraph of normalizeText(content).split(/\n{2,}/).map((item) => item.trim()).filter((item) => item.length > 200)) {
+    counts.set(paragraph, (counts.get(paragraph) ?? 0) + 1);
+  }
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([paragraph]) => paragraph.slice(0, 260));
+}
+
+function findForbiddenPhrases(content: string) {
+  const phrases = [
+    "Materiał źródłowy",
+    "Brak przykładów wzorcowych",
+    "Treść wymaga uzupełnienia",
+    "Plik "
+  ];
+  const lower = content.toLowerCase();
+  return phrases.filter((phrase) => lower.includes(phrase.toLowerCase()));
 }
 
 function isEmptyTemplateBody(body: string) {
