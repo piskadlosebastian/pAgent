@@ -158,20 +158,15 @@ export function composeFromTemplate(input: {
   aiSections?: Record<string, string>;
 }) {
   const sections = asTemplateSections(input.template.sections);
-  const sectionBlocks = sections.map((section) => {
-    const generated = input.aiSections?.[section.title] || builtinSectionContent(section.title, input);
-    return `${section.title}\n${generated}`;
-  });
-
-  return [
-    input.template.name,
-    `Wersja wzoru: ${input.template.version}`,
-    `Typ dokumentu: ${input.documentType}`,
-    "",
-    ...sectionBlocks,
-    "",
-    "Dokument wymaga weryfikacji i zatwierdzenia przez uprawnionego specjalistę"
-  ].join("\n\n");
+  const sectionContent = Object.fromEntries(
+    sections.map((section) => [
+      section.title,
+      input.aiSections?.[section.title]?.trim() || builtinSectionContent(section.title, input)
+    ])
+  );
+  const filled = fillTemplateText(input.template.extractedText, sections, sectionContent);
+  const footer = "Dokument wymaga weryfikacji i zatwierdzenia przez uprawnionego specjalistę";
+  return filled.toLowerCase().includes(footer.toLowerCase()) ? filled : `${filled}\n\n${footer}`;
 }
 
 export function validateAgainstTemplate(content: string, template: Pick<DocumentTemplate, "sections">): ValidationReport {
@@ -255,6 +250,64 @@ function builtinSectionContent(sectionTitle: string, input: {
   ].join("\n");
 }
 
+function fillTemplateText(templateText: string, sections: TemplateSection[], sectionContent: Record<string, string>) {
+  let output = normalizeText(templateText);
+  let replacedPlaceholder = false;
+
+  for (const section of sections) {
+    const content = sectionContent[section.title];
+    if (!content) continue;
+    const escapedTitle = escapeRegExp(section.title);
+    const placeholder = new RegExp(`\\{\\{\\s*${escapedTitle}\\s*\\}\\}`, "gi");
+    if (placeholder.test(output)) {
+      output = output.replace(placeholder, content);
+      replacedPlaceholder = true;
+    }
+  }
+
+  const lines = output.split("\n");
+  const headingIndexes = sections
+    .map((section) => ({
+      section,
+      index: lines.findIndex((line) => sameHeading(line.trim(), section.title))
+    }))
+    .filter((item) => item.index !== -1)
+    .sort((a, b) => a.index - b.index);
+
+  if (!headingIndexes.length) {
+    const appended = sections
+      .map((section) => `${section.title}\n${sectionContent[section.title] || ""}`)
+      .join("\n\n");
+    return [output, appended].filter(Boolean).join("\n\n");
+  }
+
+  for (let i = headingIndexes.length - 1; i >= 0; i -= 1) {
+    const { section, index } = headingIndexes[i];
+    const nextIndex = headingIndexes[i + 1]?.index ?? lines.length;
+    const existingBody = lines.slice(index + 1, nextIndex).join("\n").trim();
+    const content = sectionContent[section.title] || "";
+    const shouldReplaceBody = replacedPlaceholder || isEmptyTemplateBody(existingBody);
+    const replacement = shouldReplaceBody
+      ? [lines[index], content].filter(Boolean)
+      : [lines[index], existingBody, content].filter(Boolean);
+    lines.splice(index, nextIndex - index, ...replacement);
+  }
+
+  return normalizeText(lines.join("\n"));
+}
+
+function isEmptyTemplateBody(body: string) {
+  if (!body.trim()) return true;
+  const normalized = body.trim().toLowerCase();
+  return (
+    /\{\{[^}]+\}\}/.test(body) ||
+    normalized.includes("do uzupełnienia") ||
+    normalized.includes("uzupełnić") ||
+    normalized.includes("wpisz") ||
+    normalized === "-"
+  );
+}
+
 function normalizeText(text: string) {
   return text.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -281,6 +334,10 @@ function similarity(queryTerms: Set<string>, textTerms: Set<string>) {
 function sameHeading(line: string, title: string) {
   const normalized = line.replace(/^\d+[\).\s-]+/, "").trim().toLowerCase();
   return normalized === title.toLowerCase();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isLikelyHeading(line: string) {

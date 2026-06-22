@@ -10,7 +10,9 @@ Pracuj wyłącznie na faktach z:
 3. notatek specjalisty,
 4. zweryfikowanych przykładów wzorcowych.
 
-Nie diagnozuj samodzielnie. Nie twórz hipotez. Nie dopisuj wyników, trudności, zaleceń ani rozpoznań, których nie ma w materiałach źródłowych. Jeżeli dla sekcji brakuje danych, wpisz krótko: "Brak danych w załączonych materiałach - do uzupełnienia przez specjalistę". Styl ma być formalny, uporządkowany i zgodny z dokumentacją PPP.`;
+Nie diagnozuj samodzielnie. Nie twórz hipotez. Nie dopisuj wyników, trudności, zaleceń ani rozpoznań, których nie ma w materiałach źródłowych. Jeżeli dla sekcji brakuje danych, wpisz krótko: "Brak danych w załączonych materiałach - do uzupełnienia przez specjalistę". Styl ma być formalny, uporządkowany i zgodny z dokumentacją PPP.
+
+System wklei Twoje odpowiedzi do aktywnego wzoru. Dlatego odpowiedzi muszą być samą treścią sekcji, bez nazw sekcji, bez numerowania, bez komentarzy i bez nowego układu dokumentu.`;
 
 // Moduł anonimizacji (struktura)
 export function anonymizeData(text: string, child: Child): string {
@@ -215,7 +217,7 @@ function buildOpinionPrompt(input: {
     `Typ dokumentu: ${input.documentType}`,
     input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "Aktywny wzór: brak",
     "",
-    "Wzór dokumentu jest obowiązkowy. Poniżej znajduje się tekst wzoru do zachowania jako nadrzędny kontekst:",
+    "Wzór dokumentu jest obowiązkowy. System wklei Twoje odpowiedzi do poniższego wzoru. Nie odtwarzaj całego wzoru w odpowiedzi:",
     input.template?.extractedText.slice(0, 7000) || "brak",
     "",
     "Sekcje wzoru, których nie wolno zmieniać:",
@@ -238,7 +240,7 @@ function buildOpinionPrompt(input: {
       ? ["", "Zweryfikowane przykłady wzorcowe RAG:", input.similarExamples.map((example) => `# ${example.title}\n${example.extractedText.slice(0, 2400)}`).join("\n---\n")]
       : []),
     "",
-    "Zwróć wyłącznie JSON w formacie: {\"Nazwa sekcji\":\"treść sekcji\"}. Kluczami mogą być tylko dokładne nazwy sekcji z listy wzoru. Nie zwracaj pełnego dokumentu. Nie dodawaj wstępów, komentarzy, markdown ani nowych nagłówków. Każda wartość JSON ma być gotową treścią danej sekcji, bez powtarzania nazwy sekcji."
+    "Zwróć wyłącznie JSON w formacie: {\"Nazwa sekcji\":\"treść do wklejenia w tę sekcję wzoru\"}. Kluczami mogą być tylko dokładne nazwy sekcji z listy wzoru. Nie zwracaj pełnego dokumentu. Nie dodawaj wstępów, komentarzy, markdown ani nowych nagłówków. Każda wartość JSON ma być gotową treścią danej sekcji, bez powtarzania nazwy sekcji."
   ].join("\n");
 }
 
