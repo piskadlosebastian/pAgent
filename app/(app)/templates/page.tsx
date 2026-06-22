@@ -43,7 +43,7 @@ export default function TemplatesPage() {
     if (!file) return;
     setMessage("");
     const formData = new FormData();
-    formData.set("name", name || file.name.replace(/\.docx$/i, ""));
+    formData.set("name", name || file.name.replace(/\.(doc|docx)$/i, ""));
     formData.set("type", type);
     formData.set("version", version);
     formData.set("active", String(active));
@@ -93,8 +93,8 @@ export default function TemplatesPage() {
             Ustaw jako aktywny wzór dla tego typu
           </label>
           <div className="field">
-            <label>Plik DOCX</label>
-            <input className="input" type="file" accept=".docx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+            <label>Plik DOC lub DOCX</label>
+            <input className="input" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
           </div>
           <button className="button accent" type="button" onClick={uploadTemplate} disabled={!file}>
             <FileUp size={18} aria-hidden />

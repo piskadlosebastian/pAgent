@@ -88,7 +88,7 @@ export default function ExamplesPage() {
           </div>
           <div className="field">
             <label>Plik DOC, DOCX lub TXT</label>
-            <input className="input" type="file" accept=".doc,.docx,.txt" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+            <input className="input" type="file" accept=".doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
           </div>
           <button className="button accent" type="button" onClick={uploadExample} disabled={!file}>
             <FileUp size={18} aria-hidden />

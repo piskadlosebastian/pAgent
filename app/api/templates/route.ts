@@ -5,10 +5,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { documentTemplateSchema } from "@/lib/validators";
-import { extractDocxText, extractTemplateSections } from "@/lib/document-knowledge";
+import { extractPlainText, extractTemplateSections, fileHasExtension } from "@/lib/document-knowledge";
 import { writeAuditLog } from "@/lib/audit";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOC_MIME = "application/msword";
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 
 export async function GET() {
@@ -32,8 +33,10 @@ export async function POST(request: Request) {
   });
 
   if (!parsed.success) return NextResponse.json({ error: "Nieprawidłowe dane wzoru." }, { status: 400 });
-  if (!(file instanceof File)) return NextResponse.json({ error: "Brak pliku DOCX." }, { status: 400 });
-  if (file.type !== DOCX_MIME) return NextResponse.json({ error: "Wzór musi być plikiem DOCX." }, { status: 400 });
+  if (!(file instanceof File)) return NextResponse.json({ error: "Brak pliku DOC lub DOCX." }, { status: 400 });
+  if (![DOCX_MIME, DOC_MIME].includes(file.type) && !fileHasExtension(file.name, [".doc", ".docx"])) {
+    return NextResponse.json({ error: "Wzór musi być plikiem DOC lub DOCX." }, { status: 400 });
+  }
   if (file.size > MAX_FILE_SIZE) return NextResponse.json({ error: "Plik przekracza limit 12 MB." }, { status: 400 });
 
   const storedName = `${randomUUID()}-${file.name.replace(/[^a-z0-9._-]+/gi, "_")}`;
@@ -42,7 +45,7 @@ export async function POST(request: Request) {
   const storagePath = path.join(directory, storedName);
   await writeFile(storagePath, Buffer.from(await file.arrayBuffer()));
 
-  const extractedText = await extractDocxText(storagePath);
+  const extractedText = await extractPlainText(storagePath, file.type, file.name);
   const sections = extractTemplateSections(extractedText);
 
   if (parsed.data.active) {
@@ -60,7 +63,7 @@ export async function POST(request: Request) {
       status: parsed.data.active ? "ACTIVE" : "ARCHIVED",
       originalName: file.name,
       storedName,
-      mimeType: file.type,
+      mimeType: file.type || "application/octet-stream",
       size: file.size,
       storagePath,
       extractedText,

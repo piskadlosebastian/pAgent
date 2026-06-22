@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { writeAuditLog } from "@/lib/audit";
+import { fileHasExtension } from "@/lib/document-knowledge";
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const allowedMimeTypes = new Set([
@@ -15,6 +16,7 @@ const allowedMimeTypes = new Set([
   "image/png",
   "image/jpeg"
 ]);
+const allowedExtensions = [".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg"];
 
 export async function POST(request: Request) {
   const user = await requireUser();
@@ -24,7 +26,9 @@ export async function POST(request: Request) {
 
   if (!(file instanceof File)) return NextResponse.json({ error: "Brak pliku." }, { status: 400 });
   if (file.size > MAX_FILE_SIZE) return NextResponse.json({ error: "Plik przekracza limit 12 MB." }, { status: 400 });
-  if (!allowedMimeTypes.has(file.type)) return NextResponse.json({ error: "Niedozwolony typ pliku." }, { status: 400 });
+  if (!allowedMimeTypes.has(file.type) && !fileHasExtension(file.name, allowedExtensions)) {
+    return NextResponse.json({ error: "Niedozwolony typ pliku." }, { status: 400 });
+  }
 
   const document = await prisma.document.findFirst({ where: { id: documentId, userId: user.id } });
   if (!document) return NextResponse.json({ error: "Nie znaleziono dokumentu." }, { status: 404 });
@@ -40,7 +44,7 @@ export async function POST(request: Request) {
     data: {
       originalName: file.name,
       storedName,
-      mimeType: file.type,
+      mimeType: file.type || "application/octet-stream",
       size: file.size,
       storagePath,
       documentId,

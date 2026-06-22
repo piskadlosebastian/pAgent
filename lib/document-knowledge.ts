@@ -35,6 +35,11 @@ export function pppTypeLabel(type: PppDocumentType | string) {
   return PPP_DOCUMENT_TYPES.find((item) => item.value === type)?.label ?? "Inne";
 }
 
+export function fileHasExtension(fileName: string, extensions: string[]) {
+  const lower = fileName.toLowerCase();
+  return extensions.some((extension) => lower.endsWith(extension));
+}
+
 export async function extractDocxText(storagePath: string) {
   const result = await mammoth.extractRawText({ path: storagePath });
   return normalizeText(result.value);
@@ -50,14 +55,14 @@ export async function extractDocText(storagePath: string) {
   }
 }
 
-export async function extractPlainText(storagePath: string, mimeType?: string | null) {
-  if (mimeType === "application/msword") {
+export async function extractPlainText(storagePath: string, mimeType?: string | null, fileName?: string | null) {
+  if (mimeType === "application/msword" || fileHasExtension(fileName ?? storagePath, [".doc"])) {
     return extractDocText(storagePath);
   }
-  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || fileHasExtension(fileName ?? storagePath, [".docx"])) {
     return extractDocxText(storagePath);
   }
-  if (mimeType?.startsWith("text/")) {
+  if (mimeType?.startsWith("text/") || fileHasExtension(fileName ?? storagePath, [".txt"])) {
     return normalizeText(await readFile(storagePath, "utf8"));
   }
   return "";
