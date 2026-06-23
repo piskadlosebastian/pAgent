@@ -214,7 +214,6 @@ async function callPollinationsAgent(agent: AiAgentDefinition, prompt: string, s
       temperature: 0.1,
       max_tokens: 8192,
       stream: false,
-      reasoning_effort: "none",
       response_format: { type: "json_object" }
     })
   });
