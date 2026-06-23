@@ -85,13 +85,15 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     similarExamples,
     agentId: organization?.aiProvider
   });
-  const generatedDocxPath = generated.aiSections
+  const generatedDocx = generated.aiSections
     ? await buildDocxFromTemplate({
         documentId: id,
         template,
         aiSections: generated.aiSections
       })
     : null;
+  const generatedDocxPath = generatedDocx?.path ?? null;
+  const docxValidationErrors = generatedDocx?.validationErrors ?? [];
   const validationReport = {
     ...(generated.validationReport ?? {
       valid: false,
@@ -102,8 +104,10 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       repeatedParagraphs: [],
       forbiddenPhrases: []
     }),
-    generatedDocxPath
+    generatedDocxPath,
+    docxValidationErrors
   };
+  const isValid = Boolean(generated.validationReport?.valid) && docxValidationErrors.length === 0;
 
   const updated = await prisma.document.update({
     where: { id },
@@ -112,7 +116,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       templateId: template.id,
       templateVersion: template.version,
       pppType,
-      validationStatus: generated.validationReport?.valid ? "VALID" : "NEEDS_FIX",
+      validationStatus: isValid ? "VALID" : "NEEDS_FIX",
       validationReport: validationReport as Prisma.InputJsonValue
     },
     include: { child: true, files: true, template: true }

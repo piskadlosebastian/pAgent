@@ -10,6 +10,11 @@ type GeneratedDocxInput = {
   aiSections: Record<string, string>;
 };
 
+type DocxBuildResult = {
+  path: string;
+  validationErrors: string[];
+};
+
 export async function buildDocxFromTemplate(input: GeneratedDocxInput) {
   if (!isDocxTemplate(input.template)) return null;
 
@@ -21,12 +26,13 @@ export async function buildDocxFromTemplate(input: GeneratedDocxInput) {
   const originalXml = documentEntry.getData().toString("utf8");
   const filledXml = fillDocumentXml(originalXml, sections, input.aiSections);
   zip.updateFile("word/document.xml", Buffer.from(filledXml, "utf8"));
+  const validationErrors = validateGeneratedDocxXml(originalXml, filledXml);
 
   const outputDirectory = path.join(process.cwd(), "storage", "generated");
   await mkdir(outputDirectory, { recursive: true });
   const outputPath = path.join(outputDirectory, `${input.documentId}.docx`);
   await writeFile(outputPath, zip.toBuffer());
-  return outputPath;
+  return { path: outputPath, validationErrors } satisfies DocxBuildResult;
 }
 
 function isDocxTemplate(template: Pick<DocumentTemplate, "mimeType" | "originalName">) {
@@ -48,12 +54,12 @@ function fillDocumentXml(xml: string, sections: TemplateSection[], aiSections: R
     const section = sections.find((item) => item.occurrence === occurrence);
     const signature = sectionSignature(section);
     if (signature && signature === lastSignature) {
-      return replaceParagraphText(paragraph, "");
+      return "";
     }
     if (signature) lastSignature = signature;
 
     const content = section ? aiSections[section.title] : "";
-    return replaceParagraphText(paragraph, content || "Brak danych w załączonych materiałach.");
+    return replaceParagraphText(paragraph, content || "Brak danych w załączonych materiałach.", isListParagraph(paragraph));
   });
 }
 
@@ -65,10 +71,10 @@ function extractParagraphText(paragraph: string) {
     .trim();
 }
 
-function replaceParagraphText(paragraph: string, replacement: string) {
+function replaceParagraphText(paragraph: string, replacement: string, preferList = false) {
   const textMatches = [...paragraph.matchAll(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g)];
   if (!textMatches.length) return paragraph;
-  const blocks = splitReplacementBlocks(replacement);
+  const blocks = splitReplacementBlocks(replacement, preferList);
   if (!blocks.length) return "";
 
   return blocks.map((block) => replaceParagraphWithSingleBlock(paragraph, block)).join("");
@@ -83,12 +89,20 @@ function replaceParagraphWithSingleBlock(paragraph: string, replacement: string)
   });
 }
 
-function splitReplacementBlocks(replacement: string) {
+function splitReplacementBlocks(replacement: string, preferList: boolean) {
   return replacement
     .replace(/\r/g, "")
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[\).])\s+)/)
-    .map((block) => block.replace(/\s+/g, " ").trim())
+    .map((block) => {
+      const cleaned = block.replace(/\s+/g, " ").trim();
+      const listMatch = cleaned.match(/^(?:[-•*]|\d+[\).])\s+(.+)$/);
+      return preferList && listMatch ? listMatch[1].trim() : cleaned;
+    })
     .filter(Boolean);
+}
+
+function isListParagraph(paragraph: string) {
+  return /<w:numPr\b[\s\S]*?<\/w:numPr>/.test(paragraph) || /<w:pStyle\b[^>]*w:val="[^"]*(?:List|Lista|Bullet|Punkt)[^"]*"/i.test(paragraph);
 }
 
 function sectionSignature(section?: Pick<TemplateSection, "marker" | "instruction" | "parentHeading" | "pointNumber">) {
@@ -99,6 +113,44 @@ function sectionSignature(section?: Pick<TemplateSection, "marker" | "instructio
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function validateGeneratedDocxXml(originalXml: string, filledXml: string) {
+  const errors: string[] = [];
+  const originalParagraphs = countParagraphs(originalXml);
+  const filledParagraphs = countParagraphs(filledXml);
+  const paragraphTexts = extractParagraphTexts(filledXml);
+  const text = paragraphTexts.join("\n");
+
+  if (paragraphTexts.some((paragraph) => isTextMarker(paragraph))) {
+    errors.push("W wygenerowanym DOCX nadal występuje placeholder Tekst/tekst.");
+  }
+
+  for (const requiredSection of ["Diagnoza", "Zalecenia", "Dodatkowe informacje"]) {
+    if (!text.toLowerCase().includes(requiredSection.toLowerCase())) {
+      errors.push(`Brakuje sekcji wzoru: ${requiredSection}.`);
+    }
+  }
+
+  if (filledParagraphs < Math.floor(originalParagraphs * 0.9)) {
+    errors.push("Liczba akapitów w DOCX jest znacząco mniejsza niż we wzorze.");
+  }
+
+  if (paragraphTexts.some((paragraph) => paragraph.length > 2500)) {
+    errors.push("W DOCX wykryto akapit dłuższy niż 2500 znaków, co sugeruje sklejenie tekstu.");
+  }
+
+  return errors;
+}
+
+function countParagraphs(xml: string) {
+  return (xml.match(/<w:p\b/g) ?? []).length;
+}
+
+function extractParagraphTexts(xml: string) {
+  return [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)]
+    .map((match) => extractParagraphText(match[0]))
+    .filter(Boolean);
 }
 
 function escapeXml(value: string) {
