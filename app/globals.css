@@ -827,6 +827,120 @@ h2 {
   box-shadow: 0 14px 30px rgba(124, 111, 175, 0.35);
 }
 
+.generation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(252, 251, 253, 0.78);
+  backdrop-filter: blur(14px);
+}
+
+.generation-card {
+  width: min(620px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 28px;
+  border: 1px solid rgba(236, 232, 242, 0.95);
+  border-radius: 24px;
+  background: #FFFFFF;
+  box-shadow: 0 24px 70px rgba(46, 49, 66, 0.18);
+}
+
+.generation-card h2 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 24px;
+}
+
+.generation-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.generation-spinner {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  color: var(--primary);
+  background: rgba(243, 214, 228, 0.35);
+}
+
+.generation-spinner svg {
+  animation: spin 1.1s linear infinite;
+}
+
+.generation-progress {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(236, 232, 242, 0.95);
+}
+
+.generation-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), #D897B3);
+  transition: width 500ms ease;
+}
+
+.generation-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.generation-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.generation-steps li span,
+.generation-steps li svg {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+}
+
+.generation-steps li span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(236, 232, 242, 0.95);
+  font-size: 12px;
+}
+
+.generation-steps li.active {
+  color: var(--primary);
+}
+
+.generation-steps li.done {
+  color: var(--ink);
+}
+
+.generation-steps li.done svg {
+  color: #4F9D69;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .topbar-title > div,
 .hero-panel > *,
 .stat > *,

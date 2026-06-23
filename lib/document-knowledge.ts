@@ -29,6 +29,7 @@ export type ValidationReport = {
   remainingPlaceholders: string[];
   repeatedParagraphs: string[];
   forbiddenPhrases: string[];
+  shortFields?: string[];
 };
 
 export function normalizePppType(value?: string | null): PppDocumentType {
@@ -444,7 +445,7 @@ function summarizeSourceForFallback(text: string) {
 
 function findRepeatedParagraphs(content: string) {
   const counts = new Map<string, number>();
-  for (const paragraph of normalizeText(content).split(/\n{2,}/).map((item) => item.trim()).filter((item) => item.length > 200)) {
+  for (const paragraph of normalizeText(content).split(/\n{2,}/).map((item) => item.trim()).filter((item) => item.length > 150)) {
     counts.set(paragraph, (counts.get(paragraph) ?? 0) + 1);
   }
   return [...counts.entries()].filter(([, count]) => count > 1).map(([paragraph]) => paragraph.slice(0, 260));

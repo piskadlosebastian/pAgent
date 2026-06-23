@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileUp, Sparkles } from "lucide-react";
+import { CheckCircle2, FileUp, LoaderCircle, Sparkles } from "lucide-react";
 
 type ChildItem = {
   id: string;
@@ -29,6 +29,8 @@ export default function NewOpinionPage() {
   const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
+  const [generationPending, setGenerationPending] = useState(false);
+  const [generationStep, setGenerationStep] = useState(0);
 
   useEffect(() => {
     fetch("/api/children")
@@ -38,6 +40,17 @@ export default function NewOpinionPage() {
         if (data[0]) setChildId(data[0].id);
       });
   }, []);
+
+  useEffect(() => {
+    if (!generationPending) {
+      setGenerationStep(0);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setGenerationStep((step) => Math.min(step + 1, generationSteps.length - 1));
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [generationPending]);
 
   async function saveDraft() {
     setMessage("");
@@ -95,9 +108,12 @@ export default function NewOpinionPage() {
       return;
     }
     setPending(true);
+    setGenerationPending(true);
+    setGenerationStep(0);
     setMessage("Generuję projekt na podstawie aktywnego wzoru i załączonych dokumentów źródłowych...");
     const response = await fetch(`/api/documents/${createdDocument.id}/generate`, { method: "POST" });
     setPending(false);
+    setGenerationPending(false);
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setMessage(data.error ?? "Nie udało się wygenerować dokumentu.");
@@ -106,14 +122,47 @@ export default function NewOpinionPage() {
     const document = await response.json();
     setCreatedDocument(document);
     setGeneratedContent(document.generatedContent ?? "");
-    setMessage("Projekt został wygenerowany do weryfikacji specjalisty.");
+    setMessage("Dokument jest gotowy do sprawdzenia.");
   }
 
   const steps = ["Dane dziecka", "Typ i wzór", "Dokumenty źródłowe", "Generowanie", "Weryfikacja"];
+  const generationSteps = [
+    "Odczytywanie dokumentów",
+    "Tworzenie profilu dziecka",
+    "Dopasowywanie treści do pól wzoru",
+    "Generowanie opisu",
+    "Sprawdzanie jakości",
+    "Przygotowanie pliku DOCX"
+  ];
   const currentStep = generatedContent ? 4 : createdDocument?.files?.length ? 3 : createdDocument ? 2 : childId ? 1 : 0;
 
   return (
     <div className="grid">
+      {generationPending ? (
+        <div className="generation-overlay" role="status" aria-live="polite">
+          <div className="generation-card">
+            <div className="generation-spinner">
+              <LoaderCircle size={34} aria-hidden />
+            </div>
+            <div>
+              <h2>pAgent przygotowuje dokument</h2>
+              <p>Analizujemy załączone materiały, łączymy informacje i uzupełniamy wzór opinii. To może potrwać chwilę.</p>
+            </div>
+            <div className="generation-progress" aria-hidden>
+              <span style={{ width: `${Math.max(12, ((generationStep + 1) / generationSteps.length) * 100)}%` }} />
+            </div>
+            <ol className="generation-steps">
+              {generationSteps.map((step, index) => (
+                <li className={index < generationStep ? "done" : index === generationStep ? "active" : ""} key={step}>
+                  {index < generationStep ? <CheckCircle2 size={18} aria-hidden /> : <span>{index + 1}</span>}
+                  {step}
+                </li>
+              ))}
+            </ol>
+            <p className="muted">Nie zamykaj okna i nie odświeżaj strony podczas generowania.</p>
+          </div>
+        </div>
+      ) : null}
       <section className="panel">
         <div className="page-title">
           <h1>Nowa opinia</h1>

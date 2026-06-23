@@ -2,7 +2,7 @@ import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "..
 import { getAiAgent, type AiAgentDefinition, type AiAgentId } from "@/lib/ai-agents";
 import { asTemplateSections, composeFromTemplate, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
 
-export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś asystentem pAgent do wypełniania dokumentów WWR. Twoim jedynym zadaniem jest uzupełnienie konkretnego pola wzoru dokumentu na podstawie dokumentów źródłowych dziecka. Odpowiadasz wyłącznie na jedno wskazane pytanie lub zagadnienie. Nie piszesz całego dokumentu. Nie zmieniasz struktury wzoru. Nie kopiujesz całych źródeł. Nie powtarzasz treści z innych pól. Nie tworzysz faktów, których nie ma w materiale. Jeśli brak danych, wpisz: "Brak danych w załączonych materiałach." Pisz formalnym, rzeczowym językiem zgodnym ze stylem dokumentacji PPP.`;
+export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś specjalistycznym asystentem pAgent wspierającym przygotowanie projektów opinii WWR. Twoim zadaniem jest wypełnianie konkretnych pól wzoru dokumentu na podstawie wszystkich załączonych dokumentów źródłowych. Nie piszesz dokumentu od zera. Nie zmieniasz wzoru. Nie streszczasz nadmiernie. Tworzysz rozbudowane, merytoryczne i formalne opisy funkcjonowania dziecka, zgodne z pytaniem danego pola. Łączysz informacje z wielu dokumentów w jedną spójną wypowiedź. Nie kopiujesz całych dokumentów. Nie powtarzasz tych samych akapitów. Nie tworzysz faktów, których nie ma w źródłach. Jeżeli dane są niepełne, zaznaczasz to rzeczowo. Styl ma być zgodny z dokumentacją poradni psychologiczno-pedagogicznej.`;
 
 export function anonymizeData(text: string, child: Child): string {
   let anonymized = text;
@@ -37,9 +37,11 @@ export async function generateOpinionDraft(input: {
   const agent = getAiAgent(input.agentId);
   const sections = asTemplateSections(input.template.sections);
   let aiSections: Record<string, string> | undefined;
+  let childProfile = "";
 
   if (agent.provider === "pollinations" || agent.provider === "gemini" || agent.provider === "openrouter") {
-    aiSections = await generateFieldsWithOnlineAgent(input, sections, agent);
+    childProfile = await generateChildProfileWithOnlineAgent(input, agent);
+    aiSections = await generateFieldsWithOnlineAgent({ ...input, childProfile }, sections, agent);
   }
 
   if (agent.provider === "dify") {
@@ -57,9 +59,16 @@ export async function generateOpinionDraft(input: {
     aiSections
   });
 
+  const validationReport = validateAgainstTemplate(content, input.template);
+  const shortFields = findShortGeneratedFields(sections, aiSections, input.sourceTexts);
+  if (shortFields.length) {
+    validationReport.shortFields = shortFields;
+    validationReport.valid = false;
+  }
+
   return {
     content,
-    validationReport: validateAgainstTemplate(content, input.template),
+    validationReport,
     aiSections
   };
 }
@@ -98,6 +107,18 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
             ? await callOpenRouterAgent(agent, prompt, controller.signal)
             : await callPollinationsAgent(agent, prompt, controller.signal);
         generated = sanitizeFieldAnswer(parseSingleFieldAnswer(raw), input.sourceTexts, Object.values(output));
+        if (shouldExpandField(section, generated, input.sourceTexts)) {
+          try {
+            const expanded = await expandFieldAnswer(input, section, generated, output, agent, controller.signal);
+            generated = sanitizeFieldAnswer(expanded, input.sourceTexts, Object.values(output)) || generated;
+          } catch (error) {
+            console.warn("[AI] Field expansion failed", {
+              field: section.title,
+              agentId: agent.id,
+              error: error instanceof Error ? error.message : "UNKNOWN_ERROR"
+            });
+          }
+        }
         break;
       } catch (error) {
         console.warn("[AI] Field agent failed, trying fallback", {
@@ -116,6 +137,60 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
   }
 
   return output;
+}
+
+async function generateChildProfileWithOnlineAgent(input: GenerationInput, selectedAgent: AiAgentDefinition) {
+  const agents = getOnlineFallbackAgents(selectedAgent);
+
+  for (const agent of agents) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const raw = agent.provider === "gemini"
+        ? await callGeminiAgent(agent, buildChildProfilePrompt(input), controller.signal)
+        : agent.provider === "openrouter"
+          ? await callOpenRouterAgent(agent, buildChildProfilePrompt(input), controller.signal)
+          : await callPollinationsAgent(agent, buildChildProfilePrompt(input), controller.signal);
+      return sanitizeProfile(parseSingleFieldAnswer(raw));
+    } catch (error) {
+      console.warn("[AI] Profile agent failed, trying fallback", {
+        agentId: agent.id,
+        provider: agent.provider,
+        model: agent.model,
+        error: error instanceof Error ? error.message : "UNKNOWN_ERROR"
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return buildFallbackChildProfile(input);
+}
+
+async function expandFieldAnswer(
+  input: GenerationInput,
+  section: TemplateSection,
+  currentAnswer: string,
+  previousFields: Record<string, string>,
+  agent: AiAgentDefinition,
+  signal: AbortSignal
+) {
+  const prompt = [
+    buildFieldPrompt(input, section, previousFields),
+    "",
+    "Dotychczasowa odpowiedź jest zbyt krótka względem ilości materiału źródłowego. Rozwiń opis, uwzględniając więcej szczegółów z profilu dziecka.",
+    "Nie zmieniaj zakresu pola i nie dodawaj informacji spoza źródeł.",
+    "",
+    `Dotychczasowa odpowiedź:\n${currentAnswer}`,
+    "",
+    "Zwróć JSON w formacie: {\"content\":\"rozbudowana treść pola\"}."
+  ].join("\n");
+  const raw = agent.provider === "gemini"
+    ? await callGeminiAgent(agent, prompt, signal)
+    : agent.provider === "openrouter"
+      ? await callOpenRouterAgent(agent, prompt, signal)
+      : await callPollinationsAgent(agent, prompt, signal);
+  return parseSingleFieldAnswer(raw);
 }
 
 async function generateFieldsWithDify(input: GenerationInput, sections: TemplateSection[]) {
@@ -172,6 +247,7 @@ type GenerationInput = {
   template?: DocumentTemplate | null;
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   agentId?: string | null;
+  childProfile?: string;
 };
 
 function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
@@ -347,8 +423,76 @@ function parseSingleFieldAnswer(text: string) {
   }
 }
 
+function buildChildProfilePrompt(input: GenerationInput) {
+  return [
+    "Na podstawie wszystkich załączonych dokumentów utwórz uporządkowany profil funkcjonowania dziecka. Nie pomijaj istotnych informacji. Połącz informacje z wielu źródeł. Usuń duplikaty. Jeżeli informacje się uzupełniają, scal je. Jeżeli są sprzeczne, oznacz je jako wymagające weryfikacji. Nie dodawaj informacji spoza dokumentów.",
+    "",
+    "Zwróć JSON w formacie: {\"profile\":\"profil dziecka z zachowaniem numerowanych sekcji\"}.",
+    "",
+    "Profil ma zawierać sekcje:",
+    "1. Dane podstawowe",
+    "2. Źródła informacji",
+    "3. Zachowanie podczas badania/obserwacji",
+    "4. Kontakt i komunikacja",
+    "5. Funkcjonowanie poznawcze",
+    "6. Funkcjonowanie emocjonalno-społeczne",
+    "7. Funkcjonowanie ruchowe",
+    "8. Motoryka mała i grafomotoryka",
+    "9. Lateralizacja",
+    "10. Percepcja wzrokowa i koordynacja wzrokowo-ruchowa",
+    "11. Samodzielność",
+    "12. Mocne strony",
+    "13. Trudności i bariery",
+    "14. Potrzeby rozwojowe",
+    "15. Zalecenia wynikające ze źródeł",
+    "16. Informacje brakujące",
+    "",
+    "Dane dziecka:",
+    `- Imię i nazwisko: ${input.child.firstName} ${input.child.lastName}`,
+    `- Data urodzenia: ${input.child.birthDate.toISOString().slice(0, 10)}`,
+    `- Placówka: ${input.child.school || "brak"}`,
+    `- Klasa/grupa: ${input.child.classGroup || "brak"}`,
+    `- Rodzice/opiekunowie: ${input.child.guardians || "brak"}`,
+    `- Notatki w bazie dziecka: ${input.child.notes || "brak"}`,
+    input.specialistNotes ? `- Uwagi specjalisty: ${input.specialistNotes}` : "",
+    "",
+    input.sourceTexts?.length
+      ? `Wszystkie dokumenty źródłowe:\n${input.sourceTexts.join("\n---\n").slice(0, 28_000)}`
+      : "Dokumenty źródłowe: brak odczytanego tekstu."
+  ].filter(Boolean).join("\n");
+}
+
+function sanitizeProfile(profile: string) {
+  return profile
+    .replace(/^```(?:json|text)?/i, "")
+    .replace(/```$/i, "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 16_000);
+}
+
+function buildFallbackChildProfile(input: GenerationInput) {
+  return [
+    "1. Dane podstawowe",
+    `${input.child.firstName} ${input.child.lastName}, data urodzenia: ${input.child.birthDate.toISOString().slice(0, 10)}.`,
+    input.child.school ? `Placówka: ${input.child.school}.` : "",
+    input.child.classGroup ? `Klasa/grupa: ${input.child.classGroup}.` : "",
+    "",
+    "2. Źródła informacji",
+    input.uploadedFiles?.length ? input.uploadedFiles.map((file) => `- ${file.originalName}`).join("\n") : "Brak listy źródeł.",
+    "",
+    "3. Informacje z dokumentów źródłowych",
+    input.sourceTexts?.length ? input.sourceTexts.join("\n---\n").slice(0, 12_000) : "Brak odczytanego tekstu.",
+    "",
+    "16. Informacje brakujące",
+    "Profil został utworzony technicznie na podstawie odczytanego tekstu źródłowego i wymaga weryfikacji specjalisty."
+  ].filter(Boolean).join("\n");
+}
+
 function buildFieldPrompt(input: GenerationInput, section: TemplateSection, previousFields: Record<string, string> = {}) {
   const relevantSources = selectRelevantSourceFragments(section, input.sourceTexts);
+  const fieldKind = classifyWwrField(section);
   return [
     `Typ dokumentu: ${input.documentType || "WWR"}.`,
     input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "",
@@ -368,8 +512,10 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
     "",
     input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
     "",
+    input.childProfile ? `Profil dziecka:\n${input.childProfile}` : "",
+    "",
     relevantSources.length
-      ? `Dane źródłowe dziecka:\n${relevantSources.join("\n---\n")}`
+      ? `Fragmenty źródłowe najbardziej związane z tym pytaniem:\n${relevantSources.join("\n---\n")}`
       : "Dokumenty źródłowe: brak odczytanego tekstu.",
     "",
     input.similarExamples?.length
@@ -380,7 +526,20 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
       : "",
     "",
     "Zadanie:",
-    "Wygeneruj odpowiedź wyłącznie dla tego jednego pola. Odpowiedź ma być konkretna, formalna i oparta tylko na danych źródłowych. Nie dodawaj zaleceń, jeśli pytanie dotyczy diagnozy. Nie opisuj diagnozy, jeśli pytanie dotyczy zaleceń. Nie kopiuj całego źródła. Nie powtarzaj akapitów z innych pól.",
+    "Wygeneruj rozbudowaną odpowiedź wyłącznie dla tego jednego pola wzoru. Odpowiedź musi być formalna, rzeczowa i oparta na źródłach. Nie streszczaj nadmiernie. Uwzględnij wszystkie istotne informacje odnoszące się do pytania. Jeżeli pytanie dotyczy diagnozy, nie twórz zaleceń. Jeżeli pytanie dotyczy zaleceń, formułuj konkretne formy wsparcia. Nie kopiuj całych źródeł. Nie powtarzaj gotowych akapitów z innych pól.",
+    "",
+    "Wymagana objętość:",
+    fieldKind === "diagnosis"
+      ? "- pole dotyczy głównej diagnozy: 2-4 rozbudowane akapity;"
+      : fieldKind === "resources_barriers"
+        ? "- pole dotyczy zasobów lub barier: 1-3 rozbudowane akapity;"
+        : fieldKind === "recommendations"
+          ? "- pole dotyczy zaleceń: 5-8 konkretnych punktów albo 2-4 akapity;"
+          : "- pole dotyczy informacji dodatkowych: odpowiedz krótko tylko wtedy, gdy źródła nie zawierają danych;",
+    "- jeżeli materiał źródłowy jest obszerny, odpowiedź również ma być bardziej szczegółowa;",
+    "- jeśli brak danych, wpisz dokładnie: Brak danych w załączonych materiałach.",
+    "",
+    detailedWwrInstruction(section),
     "",
     "Dodatkowe ograniczenia:",
     "- nie pisz całego dokumentu;",
@@ -390,7 +549,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
     "- nie używaj fraz: Materiał źródłowy, Brak przykładów wzorcowych, Treść wymaga uzupełnienia, Plik ...;",
     "- jeśli materiały nie zawierają danych dla tego pola, zwróć dokładnie: Brak danych w załączonych materiałach.",
     "",
-    "Zwróć wyłącznie treść do wklejenia w miejsce Tekst/tekst/- tekst."
+    "Zwróć JSON w formacie: {\"content\":\"treść do wklejenia w miejsce Tekst/tekst/- tekst\"}."
   ]
     .filter(Boolean)
     .join("\n");
@@ -449,6 +608,107 @@ function selectRelevantSourceFragments(section: TemplateSection, sourceTexts?: s
     totalLength += chunk.length;
   }
   return output;
+}
+
+function classifyWwrField(section: TemplateSection) {
+  const text = [section.parentHeading, section.instruction, section.title].filter(Boolean).join(" ").toLowerCase();
+  if (text.includes("możliwości psychofizycz") || text.includes("potencjał rozwoj") || text.includes("mocne strony")) {
+    return "diagnosis";
+  }
+  if (text.includes("zasob") || text.includes("barier") || text.includes("ogranicze")) {
+    return "resources_barriers";
+  }
+  if (
+    text.includes("zalec") ||
+    text.includes("warunki") ||
+    text.includes("formy wsparcia") ||
+    text.includes("wzmacniania") ||
+    text.includes("usuwania") ||
+    text.includes("przejścia") ||
+    text.includes("wsparcia dziecka")
+  ) {
+    return "recommendations";
+  }
+  return "additional";
+}
+
+function detailedWwrInstruction(section: TemplateSection) {
+  const text = [section.parentHeading, section.instruction, section.title].filter(Boolean).join(" ").toLowerCase();
+  if (text.includes("możliwości psychofizycz") || text.includes("potencjał rozwoj")) {
+    return [
+      "Instrukcja szczegółowa dla tego pola:",
+      "Uwzględnij zachowanie podczas badania, kontakt wzrokowy, komunikację, mowę, funkcjonowanie ruchowe, motorykę małą, lateralizację, percepcję wzrokową, koordynację wzrokowo-ruchową, funkcjonowanie emocjonalno-społeczne, samodzielność, wiedzę i umiejętności uczenia się, mocne strony oraz obszary wymagające wsparcia. Nie pisz zaleceń w tym polu."
+    ].join("\n");
+  }
+  if (text.includes("zasob")) {
+    return "Instrukcja szczegółowa dla tego pola:\nUwzględnij współpracę rodziców, przedszkole/szkołę, możliwość wsparcia specjalistycznego, relacje rówieśnicze, zasoby w domu i placówce oraz wszystko, co wynika ze źródeł.";
+  }
+  if (text.includes("barier") || text.includes("ogranicze")) {
+    return "Instrukcja szczegółowa dla tego pola:\nUwzględnij trudności z koncentracją, zawieszanie się, trudności w spostrzeganiu wzrokowym, koordynacji wzrokowo-ruchowej, analizie i syntezie sylabowej, trudności artykulacyjne, trudności sensoryczne, jeśli wynikają ze źródeł, oraz inne ograniczenia funkcjonalne.";
+  }
+  if (text.includes("warunki") || text.includes("formy wsparcia")) {
+    return "Instrukcja szczegółowa dla tego pola:\nFormułuj konkretne warunki i formy wsparcia: spokojne środowisko, jasne polecenia, wydłużony czas pracy, wsparcie w małych grupach, ćwiczenia motoryki, działania grafomotoryczne, wspieranie komunikacji, wzmacnianie pozytywne oraz współpracę specjalistów i rodziców.";
+  }
+  if (text.includes("przejścia") || text.includes("edukacji szkolnej")) {
+    return "Instrukcja szczegółowa dla tego pola:\nJeżeli dziecko nie jest jeszcze na etapie obowiązkowego rocznego przygotowania przedszkolnego i źródła nie dają podstaw do opisu, wpisz rzeczowo: Na podstawie załączonych materiałów brak danych wskazujących na aktualną potrzebę opisu warunków przejścia dziecka do edukacji szkolnej.";
+  }
+  if (text.includes("wzmacniania zasob") || text.includes("wykorzystania")) {
+    return "Instrukcja szczegółowa dla tego pola:\nOpisz, jak rozwijać mocne strony dziecka: aktywność ruchową, relacje rówieśnicze, samodzielność, mowę, zainteresowania, pozytywną motywację oraz współpracę z rodziną i placówką.";
+  }
+  if (text.includes("usuwania barier") && text.includes("wwr")) {
+    return "Instrukcja szczegółowa dla tego pola:\nPodaj konkretne działania terapeutyczne i rozwojowe: terapię pedagogiczną, ćwiczenia percepcji wzrokowej, koordynacji wzrokowo-ruchowej, grafomotoryki, wspieranie koncentracji, diagnozę SI, jeśli wynika ze źródeł, oraz współpracę specjalistów.";
+  }
+  if (text.includes("wychowania przedszkolnego") || text.includes("przedszkol")) {
+    return "Instrukcja szczegółowa dla tego pola:\nPodaj konkretne dostosowania w przedszkolu: krótkie polecenia, dzielenie zadań, spokojne miejsce pracy, ograniczanie nadmiaru bodźców, wsparcie relacji rówieśniczych, pozytywne wzmacnianie oraz monitorowanie funkcjonowania.";
+  }
+  if (text.includes("inne formy wsparcia")) {
+    return "Instrukcja szczegółowa dla tego pola:\nUwzględnij współpracę z rodzicami, konsultacje specjalistyczne, wsparcie psychologiczno-pedagogiczne, ewentualną diagnozę SI oraz spójność oddziaływań dom-przedszkole-terapia.";
+  }
+  if (text.includes("aac") || text.includes("migow")) {
+    return "Instrukcja szczegółowa dla tego pola:\nJeżeli źródła nie wskazują AAC ani języka migowego, wpisz: Na podstawie załączonych materiałów nie stwierdzono, aby dziecko posługiwało się wspomagającą lub alternatywną metodą komunikacji (AAC) albo językiem migowym.";
+  }
+  if (text.includes("inne informacje")) {
+    return "Instrukcja szczegółowa dla tego pola:\nWpisz tylko informacje istotne, których nie umieszczono wcześniej. Jeżeli brak, wpisz: Brak dodatkowych informacji w załączonych materiałach.";
+  }
+  if (text.includes("nowa opinia") || text.includes("nowej opinii")) {
+    return "Instrukcja szczegółowa dla tego pola:\nJeżeli nie dotyczy, wpisz: Nie dotyczy.";
+  }
+  return "";
+}
+
+function shouldExpandField(section: TemplateSection, answer: string, sourceTexts?: string[]) {
+  if (!sourceTexts?.join("").trim()) return false;
+  if (isMissingAnswer(answer)) return false;
+  const kind = classifyWwrField(section);
+  const length = normalizeForCopyCheck(answer).length;
+  const sourceLength = sourceTexts.join("\n").length;
+  if (sourceLength < 1800) return false;
+  if (kind === "diagnosis") return length < 1200 || paragraphCount(answer) < 2;
+  if (kind === "resources_barriers") return length < 650;
+  if (kind === "recommendations") return length < 850 || recommendationCount(answer) < 4;
+  return false;
+}
+
+function findShortGeneratedFields(sections: TemplateSection[], aiSections?: Record<string, string>, sourceTexts?: string[]) {
+  if (!aiSections) return [];
+  return sections
+    .filter((section) => shouldExpandField(section, aiSections[section.title] ?? "", sourceTexts))
+    .map((section) => section.instruction ?? section.title);
+}
+
+function paragraphCount(text: string) {
+  return text.split(/\n{2,}/).map((item) => item.trim()).filter((item) => item.length > 120).length;
+}
+
+function recommendationCount(text: string) {
+  return text
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter((item) => /^[-•*]|\d+[\).]/.test(item) || item.length > 80).length;
+}
+
+function isMissingAnswer(text: string) {
+  return text.trim().toLowerCase().includes("brak danych w załączonych materiałach");
 }
 
 function chunkText(text: string, maxLength: number) {
