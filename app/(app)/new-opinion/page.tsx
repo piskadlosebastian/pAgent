@@ -90,6 +90,10 @@ export default function NewOpinionPage() {
 
   async function generateFromSources() {
     if (!createdDocument) return;
+    if (!createdDocument.files?.length) {
+      setMessage("Dodaj co najmniej jeden plik źródłowy przed generowaniem dokumentu.");
+      return;
+    }
     setPending(true);
     setMessage("Generuję projekt na podstawie aktywnego wzoru i załączonych dokumentów źródłowych...");
     const response = await fetch(`/api/documents/${createdDocument.id}/generate`, { method: "POST" });
@@ -206,7 +210,7 @@ export default function NewOpinionPage() {
         ) : (
           <p className="muted" style={{ fontSize: "12px" }}>Dodaj co najmniej jeden plik źródłowy przed generowaniem opinii WWR.</p>
         )}
-        <button className="button accent" type="button" onClick={generateFromSources} disabled={!createdDocument || pending}>
+        <button className="button accent" type="button" onClick={generateFromSources} disabled={!createdDocument || !createdDocument.files?.length || pending}>
           <Sparkles size={18} aria-hidden />
           Generuj z wzoru i załączników
         </button>

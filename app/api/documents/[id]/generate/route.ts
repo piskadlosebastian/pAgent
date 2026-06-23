@@ -36,15 +36,29 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     );
   }
 
+  if (!document.files.length) {
+    return NextResponse.json(
+      { error: "Dodaj co najmniej jeden plik źródłowy przed generowaniem dokumentu." },
+      { status: 400 }
+    );
+  }
+
   const sourceTexts = (
     await Promise.all(
       document.files.map(async (file) => {
         const text = await extractPlainText(file.storagePath, file.mimeType, file.originalName);
-        if (!text) return `Plik ${file.originalName}: nie udało się odczytać tekstu automatycznie.`;
+        if (!text) return "";
         return `Plik ${file.originalName}:\n${text.slice(0, 6000)}`;
       })
     )
   ).filter(Boolean);
+
+  if (!sourceTexts.length && !document.specialistNotes?.trim()) {
+    return NextResponse.json(
+      { error: "Nie udało się odczytać tekstu z załączonych plików. Dodaj plik DOC, DOCX, PDF z warstwą tekstową albo wpisz najważniejsze dane w uwagach specjalisty." },
+      { status: 400 }
+    );
+  }
 
   const examples = await prisma.knowledgeExample.findMany({
     where: { organizationId: user.organizationId, type: pppType, status: "MODEL" },
