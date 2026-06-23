@@ -2,7 +2,7 @@ import AdmZip from "adm-zip";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { DocumentTemplate } from "../generated/prisma/client";
-import { asTemplateSections, isTextMarker, type TemplateSection } from "@/lib/document-knowledge";
+import { asTemplateSections, isTextMarker, type TemplateSection } from "./document-knowledge";
 
 type GeneratedDocxInput = {
   documentId: string;
