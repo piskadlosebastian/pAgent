@@ -1,7 +1,6 @@
 export type AiAgentId =
   | "pagent_builtin"
   | "pollinations_openai"
-  | "pollinations_mistral"
   | "gemini_flash"
   | "gemini_flash_lite"
   | "openrouter_owl_alpha"
@@ -36,14 +35,6 @@ export const AI_AGENTS: AiAgentDefinition[] = [
     description: "Darmowy agent online bez klucza API. Najszybszy wariant awaryjny bez obciążania VPS.",
     provider: "pollinations",
     model: "openai",
-    endpoint: "https://text.pollinations.ai/openai"
-  },
-  {
-    id: "pollinations_mistral",
-    name: "Pollinations Mistral",
-    description: "Darmowy agent online bez klucza API, zwykle szybki przy prostszych zadaniach.",
-    provider: "pollinations",
-    model: "mistral",
     endpoint: "https://text.pollinations.ai/openai"
   },
   {

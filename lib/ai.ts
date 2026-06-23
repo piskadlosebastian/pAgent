@@ -180,8 +180,7 @@ function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
     getAiAgent("openrouter_free"),
     getAiAgent("openrouter_kimi"),
     getAiAgent("openrouter_gpt_oss_20b"),
-    getAiAgent("pollinations_openai"),
-    getAiAgent("pollinations_mistral")
+    getAiAgent("pollinations_openai")
   ];
   const seen = new Set<string>();
   return candidates
@@ -215,13 +214,13 @@ async function callPollinationsAgent(agent: AiAgentDefinition, prompt: string, s
       temperature: 0.1,
       max_tokens: 8192,
       stream: false,
-      reasoning_effort: "minimal",
+      reasoning_effort: "none",
       response_format: { type: "json_object" }
     })
   });
   const data = await response.json();
   if (!response.ok || data.error) {
-    throw new Error(data.error?.message || `Pollinations returned HTTP_${response.status}`);
+    throw new Error(data.details?.message || data.error?.message || `Pollinations returned HTTP_${response.status}`);
   }
   const text = data.choices?.[0]?.message?.content || "";
   if (!text) throw new Error("Pollinations returned empty content");
