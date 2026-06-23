@@ -433,7 +433,7 @@ function findParentHeadingAbove(lines: string[], textIndex: number, instruction:
   return undefined;
 }
 
-function repairTemplateContextText(value: string) {
+export function repairGluedPolishText(value: string) {
   if (!value) return "";
   return value
     .replace(/\bZespółorzekający\b/g, "Zespół orzekający")
@@ -464,8 +464,30 @@ function repairTemplateContextText(value: string) {
     .replace(/\binneformy\b/gi, "inne formy")
     .replace(/\bwsparciadziecka\b/gi, "wsparcia dziecka")
     .replace(/\birodziny\b/gi, "i rodziny")
+    .replace(/\bZespółorzekającyzaleca\b/gi, "Zespół orzekający zaleca")
+    .replace(/\bzespółorzekającyzaleca\b/gi, "zespół orzekający zaleca")
+    .replace(/\bwynikającez diagnozy\b/gi, "wynikające z diagnozy")
+    .replace(/\bopiekiewychowania\b/gi, "opieki wychowania")
+    .replace(/\bopiekiwychowania\b/gi, "opieki wychowania")
+    .replace(/\bwychowania nauczania\b/gi, "wychowania i nauczania")
+    .replace(/\bopieki wychowania i nauczania\b/gi, "opieki, wychowania i nauczania")
+    .replace(/\bprocesieprzejścia\b/gi, "procesie przejścia")
+    .replace(/\bdoedukacji\b/gi, "do edukacji")
+    .replace(/\bindywidualnepotrzeby\b/gi, "indywidualne potrzeby")
+    .replace(/\bpsychofizycznei\b/gi, "psychofizyczne i")
+    .replace(/\brozwojowydziecka\b/gi, "rozwojowy dziecka")
+    .replace(/\bfunkcjonowaniedziecka\b/gi, "funkcjonowanie dziecka")
+    .replace(/\bmotorykamała\b/gi, "motoryka mała")
+    .replace(/\bkoordynacjawzrokowo-ruchowa\b/gi, "koordynacja wzrokowo-ruchowa")
+    .replace(/\bpercepcjawzrokowa\b/gi, "percepcja wzrokowa")
+    .replace(/\bfunkcjonowanieemocjonalno-społeczne\b/gi, "funkcjonowanie emocjonalno-społeczne")
+    .replace(/\bfunkcjonowaniepoznawcze\b/gi, "funkcjonowanie poznawcze")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function repairTemplateContextText(value: string) {
+  return repairGluedPolishText(value);
 }
 
 function extractPointNumber(text: string) {

@@ -1,6 +1,6 @@
 import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "../generated/prisma/client";
 import { getAiAgent, type AiAgentDefinition, type AiAgentId } from "@/lib/ai-agents";
-import { asTemplateSections, composeFromTemplate, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
+import { asTemplateSections, composeFromTemplate, repairGluedPolishText, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
 
 export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś specjalistycznym asystentem pAgent wspierającym przygotowanie projektów opinii WWR. Twoim zadaniem jest wypełnianie konkretnych pól wzoru dokumentu na podstawie wszystkich załączonych dokumentów źródłowych. Nie piszesz dokumentu od zera. Nie zmieniasz wzoru. Nie streszczasz nadmiernie. Tworzysz rozbudowane, merytoryczne i formalne opisy funkcjonowania dziecka, zgodne z pytaniem danego pola. Łączysz informacje z wielu dokumentów w jedną spójną wypowiedź. Nie kopiujesz całych dokumentów. Nie powtarzasz tych samych akapitów. Nie tworzysz faktów, których nie ma w źródłach. Jeżeli dane są niepełne, zaznaczasz to rzeczowo. Styl ma być zgodny z dokumentacją poradni psychologiczno-pedagogicznej.`;
 
@@ -48,8 +48,11 @@ export async function generateOpinionDraft(input: {
   if (agent.provider === "dify") {
     aiSections = await generateFieldsWithDify(input, sections);
   }
+  if (aiSections) {
+    aiSections = repairGeneratedSections(aiSections);
+  }
 
-  const content = composeFromTemplate({
+  const content = repairGluedPolishText(composeFromTemplate({
     template: input.template,
     child: input.child,
     documentType: input.documentType,
@@ -58,7 +61,7 @@ export async function generateOpinionDraft(input: {
     sourceTexts: input.sourceTexts,
     similarExamples: input.similarExamples,
     aiSections
-  });
+  }));
 
   const validationReport = validateAgainstTemplate(content, input.template);
   const shortFields = findShortGeneratedFields(sections, aiSections, input.sourceTexts);
@@ -274,12 +277,13 @@ type GenerationInput = {
 
 function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
   const candidates = [
-    selectedAgent,
+    ...(selectedAgent.provider !== "gemini" ? [selectedAgent] : []),
     getAiAgent("pollinations_openai"),
     getAiAgent("openrouter_owl_alpha"),
     getAiAgent("openrouter_free"),
     getAiAgent("openrouter_kimi"),
     getAiAgent("openrouter_gpt_oss_20b"),
+    ...(selectedAgent.provider === "gemini" ? [selectedAgent] : []),
     getAiAgent("gemini_flash"),
     getAiAgent("gemini_flash_lite")
   ];
@@ -293,6 +297,12 @@ function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
       if (agent.provider === "pollinations") return true;
       return false;
     });
+}
+
+function repairGeneratedSections(sections: Record<string, string>) {
+  return Object.fromEntries(
+    Object.entries(sections).map(([key, value]) => [key, repairGluedPolishText(value)])
+  );
 }
 
 function sectionGenerationKey(section: TemplateSection) {
@@ -602,7 +612,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
 }
 
 function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], previousAnswers: string[] = []) {
-  const cleaned = (answer ?? "")
+  const cleaned = repairGluedPolishText((answer ?? "")
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -614,7 +624,7 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], pre
     .replace(/Treść wymaga uzupełnienia[^.\n]*(\.|\n)?/gi, "")
     .replace(/^Plik\s+[^:\n]+:\s*/gim, "")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim());
 
   if (hasCopiedSourceFragment(cleaned, sourceTexts) || repeatsPreviousAnswer(cleaned, previousAnswers)) {
     return "Brak danych w załączonych materiałach.";
