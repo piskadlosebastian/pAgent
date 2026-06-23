@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { generateOpinionDraft } from "@/lib/ai";
+import { buildDocxFromTemplate } from "@/lib/docx-template";
 import { buildKnowledgeQuery, extractPlainText, findSimilarExamples, inferPppType } from "@/lib/document-knowledge";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
@@ -84,6 +85,25 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     similarExamples,
     agentId: organization?.aiProvider
   });
+  const generatedDocxPath = generated.aiSections
+    ? await buildDocxFromTemplate({
+        documentId: id,
+        template,
+        aiSections: generated.aiSections
+      })
+    : null;
+  const validationReport = {
+    ...(generated.validationReport ?? {
+      valid: false,
+      missingSections: [],
+      addedSections: [],
+      emptyRequiredFields: [],
+      remainingPlaceholders: [],
+      repeatedParagraphs: [],
+      forbiddenPhrases: []
+    }),
+    generatedDocxPath
+  };
 
   const updated = await prisma.document.update({
     where: { id },
@@ -93,7 +113,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       templateVersion: template.version,
       pppType,
       validationStatus: generated.validationReport?.valid ? "VALID" : "NEEDS_FIX",
-      validationReport: generated.validationReport as Prisma.InputJsonValue | undefined
+      validationReport: validationReport as Prisma.InputJsonValue
     },
     include: { child: true, files: true, template: true }
   });

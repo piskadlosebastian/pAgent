@@ -2,7 +2,7 @@ import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "..
 import { getAiAgent, type AiAgentDefinition, type AiAgentId } from "@/lib/ai-agents";
 import { asTemplateSections, composeFromTemplate, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
 
-export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś specjalistycznym asystentem do przygotowywania projektów opinii WWR w aplikacji pAgent. Twoim jedynym zadaniem jest wypełnienie obowiązującego wzoru dokumentu na podstawie dokumentów źródłowych. Wzór dokumentu jest nadrzędny i nie wolno zmieniać jego struktury. Wypełniaj wyłącznie miejsca oznaczone jako "tekst" lub "Tekst". Każde pole wypełniaj osobno, zgodnie z pytaniem lub zagadnieniem znajdującym się bezpośrednio przed tym polem. Nie kopiuj całych dokumentów źródłowych. Nie powtarzaj tych samych akapitów w różnych sekcjach. Nie twórz diagnoz ani faktów, których nie ma w materiałach. Jeśli brakuje danych, wpisz: "Brak danych w załączonych materiałach." Pisz językiem formalnym, rzeczowym i zgodnym ze stylem dokumentacji poradni psychologiczno-pedagogicznej.`;
+export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś asystentem pAgent do wypełniania dokumentów WWR. Twoim jedynym zadaniem jest uzupełnienie konkretnego pola wzoru dokumentu na podstawie dokumentów źródłowych dziecka. Odpowiadasz wyłącznie na jedno wskazane pytanie lub zagadnienie. Nie piszesz całego dokumentu. Nie zmieniasz struktury wzoru. Nie kopiujesz całych źródeł. Nie powtarzasz treści z innych pól. Nie tworzysz faktów, których nie ma w materiale. Jeśli brak danych, wpisz: "Brak danych w załączonych materiałach." Pisz formalnym, rzeczowym językiem zgodnym ze stylem dokumentacji PPP.`;
 
 export function anonymizeData(text: string, child: Child): string {
   let anonymized = text;
@@ -29,7 +29,7 @@ export async function generateOpinionDraft(input: {
   template?: DocumentTemplate | null;
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   agentId?: string | null;
-}): Promise<{ content: string; validationReport?: ValidationReport }> {
+}): Promise<{ content: string; validationReport?: ValidationReport; aiSections?: Record<string, string> }> {
   if (!input.template) {
     return { content: generateNoTemplateDraft(input) };
   }
@@ -59,7 +59,8 @@ export async function generateOpinionDraft(input: {
 
   return {
     content,
-    validationReport: validateAgainstTemplate(content, input.template)
+    validationReport: validateAgainstTemplate(content, input.template),
+    aiSections
   };
 }
 
@@ -80,39 +81,41 @@ function generateNoTemplateDraft(input: {
 
 async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: TemplateSection[], selectedAgent: AiAgentDefinition) {
   const agents = getOnlineFallbackAgents(selectedAgent);
+  const output: Record<string, string> = {};
 
-  for (const agent of agents) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120_000);
+  for (const section of sections) {
+    let generated = "";
 
-    try {
-      const prompt = buildAllFieldsPrompt(input, sections);
-      const raw = agent.provider === "gemini"
-        ? await callGeminiAgent(agent, prompt, controller.signal)
-        : agent.provider === "openrouter"
-          ? await callOpenRouterAgent(agent, prompt, controller.signal)
-          : await callPollinationsAgent(agent, prompt, controller.signal);
-      const parsed = parseFieldJson(raw);
-      const output = Object.fromEntries(
-        sections.map((section, index) => {
-          const answer = parsed[section.title] || parsed[`field_${index + 1}`] || parsed[String(index + 1)];
-          return [section.title, sanitizeFieldAnswer(answer, input.sourceTexts)];
-        })
-      );
-      return output;
-    } catch (error) {
-      console.warn("[AI] Agent failed, trying fallback", {
-        agentId: agent.id,
-        provider: agent.provider,
-        model: agent.model,
-        error: error instanceof Error ? error.message : "UNKNOWN_ERROR"
-      });
-    } finally {
-      clearTimeout(timeout);
+    for (const agent of agents) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90_000);
+
+      try {
+        const prompt = buildFieldPrompt(input, section, output);
+        const raw = agent.provider === "gemini"
+          ? await callGeminiAgent(agent, prompt, controller.signal)
+          : agent.provider === "openrouter"
+            ? await callOpenRouterAgent(agent, prompt, controller.signal)
+            : await callPollinationsAgent(agent, prompt, controller.signal);
+        generated = sanitizeFieldAnswer(parseSingleFieldAnswer(raw), input.sourceTexts, Object.values(output));
+        break;
+      } catch (error) {
+        console.warn("[AI] Field agent failed, trying fallback", {
+          field: section.title,
+          agentId: agent.id,
+          provider: agent.provider,
+          model: agent.model,
+          error: error instanceof Error ? error.message : "UNKNOWN_ERROR"
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
     }
+
+    output[section.title] = generated || "Brak danych w załączonych materiałach.";
   }
 
-  return undefined;
+  return output;
 }
 
 async function generateFieldsWithDify(input: GenerationInput, sections: TemplateSection[]) {
@@ -148,7 +151,7 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
         output[section.title] = "Brak danych w załączonych materiałach.";
       } else {
         const data = (await response.json()) as { answer?: string };
-        output[section.title] = sanitizeFieldAnswer(data.answer);
+        output[section.title] = sanitizeFieldAnswer(data.answer, input.sourceTexts, Object.values(output));
       }
     } catch {
       output[section.title] = "Brak danych w załączonych materiałach.";
@@ -283,58 +286,6 @@ async function callOpenRouterAgent(agent: AiAgentDefinition, prompt: string, sig
   return text;
 }
 
-function buildAllFieldsPrompt(input: GenerationInput, sections: TemplateSection[]) {
-  const fields = sections.map((section, index) => ({
-    id: `field_${index + 1}`,
-    index: index + 1,
-    title: section.title,
-    parentHeading: section.parentHeading ?? "",
-    pointNumber: section.pointNumber ?? "",
-    instruction: section.instruction ?? section.title
-  }));
-
-  return [
-    `Typ dokumentu: ${input.documentType}`,
-    input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "",
-    "",
-    "Wypełnij wszystkie pola TEKST z aktywnego wzoru. Nie twórz nowej struktury dokumentu.",
-    "Zwróć wyłącznie poprawny JSON w formacie:",
-    "{\"fields\":[{\"id\":\"field_1\",\"title\":\"dokładny tytuł pola\",\"content\":\"treść do wklejenia\"}]}",
-    "",
-    "Pola do wypełnienia:",
-    JSON.stringify(fields, null, 2),
-    "",
-    "Dane dziecka:",
-    `- Imię i nazwisko: ${input.child.firstName} ${input.child.lastName}`,
-    `- Data urodzenia: ${input.child.birthDate.toISOString().slice(0, 10)}`,
-    `- Placówka: ${input.child.school || "brak"}`,
-    `- Klasa/grupa: ${input.child.classGroup || "brak"}`,
-    `- Rodzice/opiekunowie: ${input.child.guardians || "brak"}`,
-    `- Notatki w bazie dziecka: ${input.child.notes || "brak"}`,
-    "",
-    input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
-    "",
-    input.sourceTexts?.length
-      ? `Wybrane dokumenty źródłowe do analizy, nie do kopiowania:\n${input.sourceTexts.join("\n---\n").slice(0, 18_000)}`
-      : "Dokumenty źródłowe: brak odczytanego tekstu.",
-    "",
-    input.similarExamples?.length
-      ? `Przykłady stylu, tylko pomocniczo:\n${input.similarExamples.map((example) => example.extractedText.slice(0, 1800)).join("\n---\n")}`
-      : "",
-    "",
-    "Zasady:",
-    "- każde pole odpowiada wyłącznie na swój punkt lub podpunkt wzoru;",
-    "- nie wolno przepisywać ani wklejać pełnych zdań, akapitów lub całego badania ze źródeł;",
-    "- opracuj własnymi słowami krótką syntezę faktów pasujących tylko do danego pola;",
-    "- nie powtarzaj tego samego tekstu w wielu polach;",
-    "- jeśli dla pola nie ma danych, wpisz dokładnie: Brak danych w załączonych materiałach.;",
-    "- nie dodawaj nagłówków, numerów punktów ani komentarzy technicznych;",
-    "- treść jednego pola ma mieć maksymalnie 600 znaków, chyba że punkt wzoru wyraźnie wymaga więcej."
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 function parseFieldJson(text: string): Record<string, string> {
   const cleaned = text.trim();
   const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
@@ -386,16 +337,26 @@ function extractBalancedJsonObject(text: string) {
   return null;
 }
 
-function buildFieldPrompt(input: GenerationInput, section: TemplateSection) {
+function parseSingleFieldAnswer(text: string) {
+  const cleaned = text.trim();
+  try {
+    const parsed = parseFieldJson(cleaned);
+    return parsed.content || parsed.answer || parsed.text || Object.values(parsed)[0] || cleaned;
+  } catch {
+    return cleaned;
+  }
+}
+
+function buildFieldPrompt(input: GenerationInput, section: TemplateSection, previousFields: Record<string, string> = {}) {
+  const relevantSources = selectRelevantSourceFragments(section, input.sourceTexts);
   return [
-    `Typ dokumentu: ${input.documentType}`,
+    `Typ dokumentu: ${input.documentType || "WWR"}.`,
     input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "",
     "",
-    "Wypełniasz dokładnie jedno miejsce oznaczone w aktywnym wzorze jako tekst/Tekst/- tekst.",
-    `Nazwa pola: ${section.title}`,
-    section.parentHeading ? `Sekcja główna: ${section.parentHeading}` : "",
-    section.pointNumber ? `Numer punktu/podpunktu: ${section.pointNumber}` : "",
-    `Pytanie lub zagadnienie bezpośrednio przed polem: ${section.instruction ?? section.title}`,
+    "Wypełniasz dokładnie jedno miejsce oznaczone w aktywnym wzorze jako Tekst, tekst albo - tekst.",
+    `Sekcja: ${section.parentHeading || inferWwrSection(section) || "nieustalona"}`,
+    `Punkt/podpunkt: ${section.pointNumber || "brak numeru"}`,
+    `Pytanie ze wzoru: ${section.instruction ?? section.title}`,
     "",
     "Dane dziecka:",
     `- Imię i nazwisko: ${input.child.firstName} ${input.child.lastName}`,
@@ -407,31 +368,35 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection) {
     "",
     input.specialistNotes ? `Uwagi specjalisty: ${input.specialistNotes}` : "",
     "",
-    input.sourceTexts?.length
-      ? `Wybrane dokumenty źródłowe:\n${input.sourceTexts.join("\n---\n").slice(0, 10_000)}`
+    relevantSources.length
+      ? `Dane źródłowe dziecka:\n${relevantSources.join("\n---\n")}`
       : "Dokumenty źródłowe: brak odczytanego tekstu.",
     "",
     input.similarExamples?.length
       ? `Przykłady stylu, tylko pomocniczo:\n${input.similarExamples.map((example) => example.extractedText.slice(0, 1200)).join("\n---\n")}`
       : "",
+    Object.values(previousFields).filter(Boolean).length
+      ? `Treści już użyte w innych polach - nie powtarzaj ich:\n${Object.values(previousFields).filter(Boolean).map((value) => value.slice(0, 500)).join("\n---\n")}`
+      : "",
     "",
-    "Instrukcja odpowiedzi:",
-    "- odpowiedz tylko na to jedno zagadnienie;",
-    "- opracuj krótką syntezę na podstawie źródeł, a nie streszczenie całego pliku;",
-    "- nie kopiuj całych dokumentów źródłowych ani pełnych akapitów ze źródeł;",
-    "- nie powtarzaj informacji, które pasują do innych pól;",
-    "- maksymalnie 1-2 krótkie akapity, chyba że punkt wzoru wyraźnie wymaga dłuższego opisu;",
+    "Zadanie:",
+    "Wygeneruj odpowiedź wyłącznie dla tego jednego pola. Odpowiedź ma być konkretna, formalna i oparta tylko na danych źródłowych. Nie dodawaj zaleceń, jeśli pytanie dotyczy diagnozy. Nie opisuj diagnozy, jeśli pytanie dotyczy zaleceń. Nie kopiuj całego źródła. Nie powtarzaj akapitów z innych pól.",
+    "",
+    "Dodatkowe ograniczenia:",
+    "- nie pisz całego dokumentu;",
+    "- nie dodawaj sekcji, nagłówków ani punktów spoza wzoru;",
+    "- nie zmieniaj struktury wzoru;",
     "- nie dodawaj nagłówków, numerów punktów, komentarzy technicznych ani instrukcji dla AI;",
     "- nie używaj fraz: Materiał źródłowy, Brak przykładów wzorcowych, Treść wymaga uzupełnienia, Plik ...;",
     "- jeśli materiały nie zawierają danych dla tego pola, zwróć dokładnie: Brak danych w załączonych materiałach.",
     "",
-    "Zwróć wyłącznie treść do wklejenia w miejsce tekst/Tekst."
+    "Zwróć wyłącznie treść do wklejenia w miejsce Tekst/tekst/- tekst."
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[]) {
+function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], previousAnswers: string[] = []) {
   const cleaned = (answer ?? "")
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
@@ -446,11 +411,76 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[]) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  if (hasCopiedSourceFragment(cleaned, sourceTexts)) {
+  if (hasCopiedSourceFragment(cleaned, sourceTexts) || repeatsPreviousAnswer(cleaned, previousAnswers)) {
     return "Brak danych w załączonych materiałach.";
   }
 
   return cleaned || "Brak danych w załączonych materiałach.";
+}
+
+function selectRelevantSourceFragments(section: TemplateSection, sourceTexts?: string[]) {
+  if (!sourceTexts?.length) return [];
+  const query = [
+    section.parentHeading,
+    section.pointNumber,
+    section.instruction,
+    section.title,
+    inferWwrSection(section)
+  ].filter(Boolean).join(" ");
+  const queryTerms = new Set(normalizeForCopyCheck(query).split(/\s+/).filter((word) => word.length > 3));
+  const chunks = sourceTexts.flatMap((source) => chunkText(source, 900));
+
+  const scored = chunks
+    .map((chunk, index) => {
+      const normalized = normalizeForCopyCheck(chunk);
+      const score = [...queryTerms].reduce((sum, term) => sum + (normalized.includes(term) ? 1 : 0), 0);
+      return { chunk, index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected = scored.filter((item) => item.score > 0).slice(0, 5);
+  const chunksToUse = selected.length ? selected : scored.slice(0, 4);
+  const output: string[] = [];
+  let totalLength = 0;
+  for (const item of chunksToUse) {
+    if (totalLength >= 7000) break;
+    const chunk = item.chunk.slice(0, Math.max(0, 7000 - totalLength));
+    output.push(chunk);
+    totalLength += chunk.length;
+  }
+  return output;
+}
+
+function chunkText(text: string, maxLength: number) {
+  const paragraphs = text.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  const chunks: string[] = [];
+  let current = "";
+  for (const paragraph of paragraphs) {
+    if (current.length + paragraph.length > maxLength && current) {
+      chunks.push(current);
+      current = "";
+    }
+    current = [current, paragraph].filter(Boolean).join("\n\n");
+  }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks.map((chunk) => chunk.slice(0, maxLength)) : [text.slice(0, maxLength)];
+}
+
+function inferWwrSection(section: TemplateSection) {
+  const text = [section.parentHeading, section.instruction, section.title].filter(Boolean).join(" ").toLowerCase();
+  if (text.includes("diagnoz") || text.includes("możliwości") || text.includes("potencja") || text.includes("barier")) return "Diagnoza";
+  if (text.includes("zalec") || text.includes("wspar") || text.includes("warunki") || text.includes("formy")) return "Zalecenia";
+  if (text.includes("aac") || text.includes("migow") || text.includes("dodatkow") || text.includes("nowej opinii")) return "Dodatkowe informacje";
+  return "";
+}
+
+function repeatsPreviousAnswer(answer: string, previousAnswers: string[]) {
+  const normalized = normalizeForCopyCheck(answer);
+  if (normalized.length < 150) return false;
+  return previousAnswers.some((previous) => {
+    const normalizedPrevious = normalizeForCopyCheck(previous);
+    return normalizedPrevious.length >= 150 && (normalizedPrevious.includes(normalized) || normalized.includes(normalizedPrevious));
+  });
 }
 
 function hasCopiedSourceFragment(answer: string, sourceTexts?: string[]) {

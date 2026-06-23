@@ -19,6 +19,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "adm-zip": "^0.5.17",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "docx": "^9.7.1",
@@ -35,6 +36,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^26.0.0",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.2.17",

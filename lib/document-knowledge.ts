@@ -398,7 +398,7 @@ function fillTextMarkers(templateText: string, sections: TemplateSection[], sect
   );
 }
 
-function isTextMarker(line: string) {
+export function isTextMarker(line: string) {
   return /^-?\s*tekst(?:\s+tekst)*\s*$/i.test(line.trim());
 }
 
