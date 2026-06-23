@@ -100,8 +100,13 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
         })
       );
       return output;
-    } catch {
-      // Try the next configured online agent.
+    } catch (error) {
+      console.warn("[AI] Agent failed, trying fallback", {
+        agentId: agent.id,
+        provider: agent.provider,
+        model: agent.model,
+        error: error instanceof Error ? error.message : "UNKNOWN_ERROR"
+      });
     } finally {
       clearTimeout(timeout);
     }
@@ -210,7 +215,8 @@ async function callPollinationsAgent(agent: AiAgentDefinition, prompt: string, s
       temperature: 0.1,
       max_tokens: 8192,
       stream: false,
-      reasoning_effort: "minimal"
+      reasoning_effort: "minimal",
+      response_format: { type: "json_object" }
     })
   });
   const data = await response.json();
@@ -334,7 +340,7 @@ function buildAllFieldsPrompt(input: GenerationInput, sections: TemplateSection[
 function parseFieldJson(text: string): Record<string, string> {
   const cleaned = text.trim();
   const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const candidate = fenced?.[1] || cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
+  const candidate = fenced?.[1] || extractBalancedJsonObject(cleaned) || cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
   const parsed = JSON.parse(candidate) as { fields?: { id?: string; title?: string; content?: string }[] } | Record<string, string>;
 
   if ("fields" in parsed && Array.isArray(parsed.fields)) {
@@ -350,6 +356,36 @@ function parseFieldJson(text: string): Record<string, string> {
   return Object.fromEntries(
     Object.entries(parsed).filter(([, value]) => typeof value === "string")
   ) as Record<string, string>;
+}
+
+function extractBalancedJsonObject(text: string) {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) return text.slice(start, index + 1);
+  }
+
+  return null;
 }
 
 function buildFieldPrompt(input: GenerationInput, section: TemplateSection) {

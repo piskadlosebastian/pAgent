@@ -377,13 +377,20 @@ function extractTextMarkerSections(lines: string[]): TemplateSection[] {
 function fillTextMarkers(templateText: string, sections: TemplateSection[], sectionContent: Record<string, string>) {
   const lines = templateText.split("\n");
   let occurrence = 0;
+  let lastFilledSignature = "";
 
   return normalizeText(
     lines
       .map((line) => {
-        if (!isTextMarker(line)) return line;
+        if (!isTextMarker(line)) {
+          if (line.trim()) lastFilledSignature = "";
+          return line;
+        }
         occurrence += 1;
         const section = sections.find((item) => item.occurrence === occurrence);
+        const signature = sectionSignature(section);
+        if (signature && signature === lastFilledSignature) return "";
+        if (signature) lastFilledSignature = signature;
         const content = section ? sectionContent[section.title] : "";
         return content || "Brak danych w załączonych materiałach - do uzupełnienia przez specjalistę";
       })
@@ -392,7 +399,17 @@ function fillTextMarkers(templateText: string, sections: TemplateSection[], sect
 }
 
 function isTextMarker(line: string) {
-  return /^-?\s*tekst\s*$/i.test(line.trim());
+  return /^-?\s*tekst(?:\s+tekst)*\s*$/i.test(line.trim());
+}
+
+function sectionSignature(section?: Pick<TemplateSection, "marker" | "instruction" | "parentHeading" | "pointNumber">) {
+  if (!section || section.marker !== "TEKST") return "";
+  return [section.parentHeading, section.pointNumber, section.instruction]
+    .filter(Boolean)
+    .join("|")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function findNearestInstructionAbove(lines: string[], textIndex: number) {
