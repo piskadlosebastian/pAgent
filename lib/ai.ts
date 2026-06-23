@@ -586,14 +586,17 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
     "",
     "Wymagana objętość:",
     fieldKind === "diagnosis"
-      ? "- pole dotyczy głównej diagnozy: 2-4 rozbudowane akapity;"
+      ? "- pole dotyczy głównej diagnozy: 2-4 rozbudowane akapity oddzielone pustą linią;"
       : fieldKind === "resources_barriers"
-        ? "- pole dotyczy zasobów lub barier: 1-3 rozbudowane akapity;"
+        ? "- pole dotyczy zasobów lub barier: 1-3 rozbudowane akapity oddzielone pustą linią;"
         : fieldKind === "recommendations"
-          ? "- pole dotyczy zaleceń: 5-8 konkretnych punktów albo 2-4 akapity;"
+          ? "- pole dotyczy zaleceń: 5-8 konkretnych punktów, każdy punkt w osobnej linii zaczynającej się od myślnika, albo 2-4 akapity oddzielone pustą linią;"
           : "- pole dotyczy informacji dodatkowych: odpowiedz krótko tylko wtedy, gdy źródła nie zawierają danych;",
     "- jeżeli materiał źródłowy jest obszerny, odpowiedź również ma być bardziej szczegółowa;",
     "- jeśli brak danych, wpisz dokładnie: Brak danych w załączonych materiałach.",
+    "- nie zwracaj odpowiedzi jako jednego ciągłego bloku tekstu;",
+    "- zachowaj czytelny układ: akapity oddzielaj pustą linią, a listy zaleceń zapisuj punkt po punkcie;",
+    "- nie dodawaj własnych nagłówków, bo nagłówki pochodzą wyłącznie ze wzoru dokumentu;",
     "",
     detailedWwrInstruction(section),
     "",

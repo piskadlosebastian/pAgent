@@ -68,21 +68,27 @@ function extractParagraphText(paragraph: string) {
 function replaceParagraphText(paragraph: string, replacement: string) {
   const textMatches = [...paragraph.matchAll(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g)];
   if (!textMatches.length) return paragraph;
+  const blocks = splitReplacementBlocks(replacement);
+  if (!blocks.length) return "";
 
+  return blocks.map((block) => replaceParagraphWithSingleBlock(paragraph, block)).join("");
+}
+
+function replaceParagraphWithSingleBlock(paragraph: string, replacement: string) {
   let replacedFirstText = false;
   return paragraph.replace(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g, (_match, attrs: string) => {
     if (replacedFirstText) return `<w:t${attrs}></w:t>`;
     replacedFirstText = true;
-    return buildTextRuns(attrs, replacement);
+    return `<w:t${attrs}>${escapeXml(replacement)}</w:t>`;
   });
 }
 
-function buildTextRuns(attrs: string, replacement: string) {
-  const lines = replacement.split(/\n+/).map((line) => escapeXml(line.trim())).filter(Boolean);
-  if (!lines.length) return `<w:t${attrs}></w:t>`;
-  return lines
-    .map((line, index) => `${index > 0 ? "<w:br/>" : ""}<w:t${attrs}>${line}</w:t>`)
-    .join("");
+function splitReplacementBlocks(replacement: string) {
+  return replacement
+    .replace(/\r/g, "")
+    .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[\).])\s+)/)
+    .map((block) => block.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
 }
 
 function sectionSignature(section?: Pick<TemplateSection, "marker" | "instruction" | "parentHeading" | "pointNumber">) {
