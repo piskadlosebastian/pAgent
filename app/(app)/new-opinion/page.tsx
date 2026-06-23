@@ -48,7 +48,7 @@ export default function NewOpinionPage() {
     }
     const interval = window.setInterval(() => {
       setGenerationStep((step) => Math.min(step + 1, generationSteps.length - 1));
-    }, 5000);
+    }, 12000);
     return () => window.clearInterval(interval);
   }, [generationPending]);
 
@@ -130,9 +130,9 @@ export default function NewOpinionPage() {
     "Odczytywanie dokumentów",
     "Tworzenie profilu dziecka",
     "Dopasowywanie treści do pól wzoru",
-    "Generowanie opisu",
-    "Sprawdzanie jakości",
-    "Przygotowanie pliku DOCX"
+    "Generowanie rozbudowanych opisów",
+    "Sprawdzanie jakości i uzupełnień",
+    "Finalizowanie dokumentu i pliku DOCX"
   ];
   const currentStep = generatedContent ? 4 : createdDocument?.files?.length ? 3 : createdDocument ? 2 : childId ? 1 : 0;
 
@@ -159,7 +159,7 @@ export default function NewOpinionPage() {
                 </li>
               ))}
             </ol>
-            <p className="muted">Nie zamykaj okna i nie odświeżaj strony podczas generowania.</p>
+            <p className="muted">Nie zamykaj okna i nie odświeżaj strony podczas generowania. Ostatni etap może nadal obejmować oczekiwanie na odpowiedzi AI.</p>
           </div>
         </div>
       ) : null}

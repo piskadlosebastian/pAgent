@@ -38,10 +38,11 @@ export async function generateOpinionDraft(input: {
   const sections = asTemplateSections(input.template.sections);
   let aiSections: Record<string, string> | undefined;
   let childProfile = "";
+  const unavailableAgentIds = new Set<string>();
 
   if (agent.provider === "pollinations" || agent.provider === "gemini" || agent.provider === "openrouter") {
-    childProfile = await generateChildProfileWithOnlineAgent(input, agent);
-    aiSections = await generateFieldsWithOnlineAgent({ ...input, childProfile }, sections, agent);
+    childProfile = await generateChildProfileWithOnlineAgent(input, agent, unavailableAgentIds);
+    aiSections = await generateFieldsWithOnlineAgent({ ...input, childProfile }, sections, agent, unavailableAgentIds);
   }
 
   if (agent.provider === "dify") {
@@ -88,7 +89,12 @@ function generateNoTemplateDraft(input: {
   ].join("\n");
 }
 
-async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: TemplateSection[], selectedAgent: AiAgentDefinition) {
+async function generateFieldsWithOnlineAgent(
+  input: GenerationInput,
+  sections: TemplateSection[],
+  selectedAgent: AiAgentDefinition,
+  unavailableAgentIds = new Set<string>()
+) {
   const agents = getOnlineFallbackAgents(selectedAgent);
   const output: Record<string, string> = {};
 
@@ -96,6 +102,7 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
     let generated = "";
 
     for (const agent of agents) {
+      if (unavailableAgentIds.has(agent.id)) continue;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 90_000);
 
@@ -121,6 +128,7 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
         }
         break;
       } catch (error) {
+        if (isConfigurationOrQuotaError(error)) unavailableAgentIds.add(agent.id);
         console.warn("[AI] Field agent failed, trying fallback", {
           field: section.title,
           agentId: agent.id,
@@ -139,10 +147,15 @@ async function generateFieldsWithOnlineAgent(input: GenerationInput, sections: T
   return output;
 }
 
-async function generateChildProfileWithOnlineAgent(input: GenerationInput, selectedAgent: AiAgentDefinition) {
+async function generateChildProfileWithOnlineAgent(
+  input: GenerationInput,
+  selectedAgent: AiAgentDefinition,
+  unavailableAgentIds = new Set<string>()
+) {
   const agents = getOnlineFallbackAgents(selectedAgent);
 
   for (const agent of agents) {
+    if (unavailableAgentIds.has(agent.id)) continue;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
@@ -153,6 +166,7 @@ async function generateChildProfileWithOnlineAgent(input: GenerationInput, selec
           : await callPollinationsAgent(agent, buildChildProfilePrompt(input), controller.signal);
       return sanitizeProfile(parseSingleFieldAnswer(raw));
     } catch (error) {
+      if (isConfigurationOrQuotaError(error)) unavailableAgentIds.add(agent.id);
       console.warn("[AI] Profile agent failed, trying fallback", {
         agentId: agent.id,
         provider: agent.provider,
@@ -271,6 +285,20 @@ function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
       if (agent.provider === "pollinations") return true;
       return false;
     });
+}
+
+function isConfigurationOrQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("quota") ||
+    message.includes("rate-limit") ||
+    message.includes("rate limit") ||
+    message.includes("missing") ||
+    message.includes("api key") ||
+    message.includes("401") ||
+    message.includes("403") ||
+    message.includes("404")
+  );
 }
 
 async function callPollinationsAgent(agent: AiAgentDefinition, prompt: string, signal: AbortSignal) {
@@ -682,10 +710,10 @@ function shouldExpandField(section: TemplateSection, answer: string, sourceTexts
   const kind = classifyWwrField(section);
   const length = normalizeForCopyCheck(answer).length;
   const sourceLength = sourceTexts.join("\n").length;
-  if (sourceLength < 1800) return false;
-  if (kind === "diagnosis") return length < 1200 || paragraphCount(answer) < 2;
-  if (kind === "resources_barriers") return length < 650;
-  if (kind === "recommendations") return length < 850 || recommendationCount(answer) < 4;
+  if (sourceLength < 2400) return false;
+  if (kind === "diagnosis") return length < 800 || paragraphCount(answer) < 2;
+  if (kind === "resources_barriers") return length < 500;
+  if (kind === "recommendations") return length < 650 || recommendationCount(answer) < 3;
   return false;
 }
 
