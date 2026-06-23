@@ -248,12 +248,12 @@ export function asTemplateSections(value: unknown): TemplateSection[] {
   if (Array.isArray(value)) {
     return value
       .map((item): TemplateSection => ({
-        title: typeof item?.title === "string" ? item.title : "",
+        title: typeof item?.title === "string" ? repairTemplateContextText(item.title) : "",
         required: item?.required !== false,
         marker: item?.marker === "TEKST" ? "TEKST" as const : undefined,
         occurrence: typeof item?.occurrence === "number" ? item.occurrence : undefined,
-        instruction: typeof item?.instruction === "string" ? item.instruction : undefined,
-        parentHeading: typeof item?.parentHeading === "string" ? item.parentHeading : undefined,
+        instruction: typeof item?.instruction === "string" ? repairTemplateContextText(item.instruction) : undefined,
+        parentHeading: typeof item?.parentHeading === "string" ? repairTemplateContextText(item.parentHeading) : undefined,
         pointNumber: typeof item?.pointNumber === "string" ? item.pointNumber : undefined
       }))
       .filter((item) => item.title);
@@ -358,7 +358,7 @@ function extractTextMarkerSections(lines: string[]): TemplateSection[] {
   for (let index = 0; index < lines.length; index += 1) {
     if (!isTextMarker(lines[index])) continue;
     occurrence += 1;
-    const instruction = findNearestInstructionAbove(lines, index) ?? `Pole tekst ${occurrence}`;
+    const instruction = repairTemplateContextText(findNearestInstructionAbove(lines, index) ?? `Pole tekst ${occurrence}`);
     const parentHeading = findParentHeadingAbove(lines, index, instruction);
     const pointNumber = extractPointNumber(instruction);
     sections.push({
@@ -367,7 +367,7 @@ function extractTextMarkerSections(lines: string[]): TemplateSection[] {
       marker: "TEKST",
       occurrence,
       instruction,
-      parentHeading,
+      parentHeading: parentHeading ? repairTemplateContextText(parentHeading) : undefined,
       pointNumber
     });
   }
@@ -431,6 +431,41 @@ function findParentHeadingAbove(lines: string[], textIndex: number, instruction:
     if (isMainHeading) return candidate.replace(/\s+/g, " ");
   }
   return undefined;
+}
+
+function repairTemplateContextText(value: string) {
+  if (!value) return "";
+  return value
+    .replace(/\bZespółorzekający\b/g, "Zespół orzekający")
+    .replace(/\bzespołorzekający\b/gi, "zespół orzekający")
+    .replace(/\borzekającyzaleca\b/gi, "orzekający zaleca")
+    .replace(/\bzalecawynikającezdiagnozy\b/gi, "zaleca wynikające z diagnozy")
+    .replace(/\bwynikającezdiagnozy\b/gi, "wynikające z diagnozy")
+    .replace(/\bdiagnozywarunki\b/gi, "diagnozy warunki")
+    .replace(/\biograniczeniach\b/gi, "i ograniczeniach")
+    .replace(/\bwpływającychna\b/gi, "wpływających na")
+    .replace(/\bwczesnegowspomagania\b/gi, "wczesnego wspomagania")
+    .replace(/\brozwojudziecka\b/gi, "rozwoju dziecka")
+    .replace(/\bmożliwościachpsychofizycznych\b/gi, "możliwościach psychofizycznych")
+    .replace(/\bpotencjalerozwojowym\b/gi, "potencjale rozwojowym")
+    .replace(/\bmocnychstronach\b/gi, "mocnych stronach")
+    .replace(/\buzdolnieniachdziecka\b/gi, "uzdolnieniach dziecka")
+    .replace(/\bśrodowiskuopieki\b/gi, "środowisku opieki")
+    .replace(/\bwychowaniai\b/gi, "wychowania i")
+    .replace(/\binauczania\b/gi, "i nauczania")
+    .replace(/\bformywsparcia\b/gi, "formy wsparcia")
+    .replace(/\bindywidualnychpotrzeb\b/gi, "indywidualnych potrzeb")
+    .replace(/\bpotrzebdziecka\b/gi, "potrzeb dziecka")
+    .replace(/\bedukacjiszkolnej\b/gi, "edukacji szkolnej")
+    .replace(/\bwzmacnianiazasobów\b/gi, "wzmacniania zasobów")
+    .replace(/\bzasobówdziecka\b/gi, "zasobów dziecka")
+    .replace(/\busuwaniabarier\b/gi, "usuwania barier")
+    .replace(/\bwychowaniuprzedszkolnym\b/gi, "wychowaniu przedszkolnym")
+    .replace(/\binneformy\b/gi, "inne formy")
+    .replace(/\bwsparciadziecka\b/gi, "wsparcia dziecka")
+    .replace(/\birodziny\b/gi, "i rodziny")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractPointNumber(text: string) {
