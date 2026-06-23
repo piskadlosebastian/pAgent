@@ -97,8 +97,16 @@ async function generateFieldsWithOnlineAgent(
 ) {
   const agents = getOnlineFallbackAgents(selectedAgent);
   const output: Record<string, string> = {};
+  const generatedKeys = new Set<string>();
 
   for (const section of sections) {
+    const key = sectionGenerationKey(section);
+    if (key && generatedKeys.has(key)) {
+      output[section.title] = "";
+      continue;
+    }
+    if (key) generatedKeys.add(key);
+
     let generated = "";
 
     for (const agent of agents) {
@@ -267,13 +275,13 @@ type GenerationInput = {
 function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
   const candidates = [
     selectedAgent,
-    getAiAgent("gemini_flash"),
-    getAiAgent("gemini_flash_lite"),
+    getAiAgent("pollinations_openai"),
     getAiAgent("openrouter_owl_alpha"),
     getAiAgent("openrouter_free"),
     getAiAgent("openrouter_kimi"),
     getAiAgent("openrouter_gpt_oss_20b"),
-    getAiAgent("pollinations_openai")
+    getAiAgent("gemini_flash"),
+    getAiAgent("gemini_flash_lite")
   ];
   const seen = new Set<string>();
   return candidates
@@ -285,6 +293,16 @@ function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
       if (agent.provider === "pollinations") return true;
       return false;
     });
+}
+
+function sectionGenerationKey(section: TemplateSection) {
+  if (section.marker !== "TEKST") return "";
+  return [section.parentHeading, section.pointNumber, section.instruction]
+    .filter(Boolean)
+    .join("|")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function isConfigurationOrQuotaError(error: unknown) {
