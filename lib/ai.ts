@@ -1,6 +1,6 @@
 import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "../generated/prisma/client";
 import { getAiAgent, type AiAgentDefinition, type AiAgentId } from "@/lib/ai-agents";
-import { asTemplateSections, composeFromTemplate, repairGluedPolishText, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
+import { asTemplateSections, composeFromTemplate, extractDocxTemplateSections, repairGluedPolishText, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
 
 export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś specjalistycznym asystentem pAgent wspierającym przygotowanie projektów opinii WWR. Twoim zadaniem jest wypełnianie konkretnych pól wzoru dokumentu na podstawie wszystkich załączonych dokumentów źródłowych. Nie piszesz dokumentu od zera. Nie zmieniasz wzoru. Nie streszczasz nadmiernie. Tworzysz rozbudowane, merytoryczne i formalne opisy funkcjonowania dziecka, zgodne z pytaniem danego pola. Łączysz informacje z wielu dokumentów w jedną spójną wypowiedź. Nie kopiujesz całych dokumentów. Nie powtarzasz tych samych akapitów. Nie tworzysz faktów, których nie ma w źródłach. Jeżeli dane są niepełne, zaznaczasz to rzeczowo. Styl ma być zgodny z dokumentacją poradni psychologiczno-pedagogicznej.`;
 
@@ -35,7 +35,11 @@ export async function generateOpinionDraft(input: {
   }
 
   const agent = getAiAgent(input.agentId);
-  const sections = asTemplateSections(input.template.sections);
+  let sections = asTemplateSections(input.template.sections);
+  if (!sections.some((section) => section.marker === "TEKST") && input.template.originalName.toLowerCase().endsWith(".docx")) {
+    const docxSections = extractDocxTemplateSections(input.template.storagePath);
+    if (docxSections.length) sections = docxSections;
+  }
   let aiSections: Record<string, string> | undefined;
   let childProfile = "";
   const unavailableAgentIds = new Set<string>();
@@ -52,8 +56,9 @@ export async function generateOpinionDraft(input: {
     aiSections = repairGeneratedSections(aiSections);
   }
 
+  const templateForGeneration = { ...input.template, sections };
   const content = repairGluedPolishText(composeFromTemplate({
-    template: input.template,
+    template: templateForGeneration,
     child: input.child,
     documentType: input.documentType,
     specialistNotes: input.specialistNotes,
@@ -63,7 +68,7 @@ export async function generateOpinionDraft(input: {
     aiSections
   }));
 
-  const validationReport = validateAgainstTemplate(content, input.template);
+  const validationReport = validateAgainstTemplate(content, templateForGeneration);
   const shortFields = findShortGeneratedFields(sections, aiSections, input.sourceTexts);
   if (shortFields.length) {
     validationReport.shortFields = shortFields;
@@ -106,6 +111,7 @@ async function generateFieldsWithOnlineAgent(
     const key = sectionGenerationKey(section);
     if (key && generatedKeys.has(key)) {
       output[section.title] = "";
+      if (section.fieldId) output[section.fieldId] = "";
       continue;
     }
     if (key) generatedKeys.add(key);
@@ -152,7 +158,9 @@ async function generateFieldsWithOnlineAgent(
       }
     }
 
-    output[section.title] = generated || "Brak danych w załączonych materiałach.";
+    const content = generated || "Brak danych w załączonych materiałach.";
+    output[section.title] = content;
+    if (section.fieldId) output[section.fieldId] = content;
   }
 
   return output;
@@ -175,7 +183,7 @@ async function generateChildProfileWithOnlineAgent(
         : agent.provider === "openrouter"
           ? await callOpenRouterAgent(agent, buildChildProfilePrompt(input), controller.signal)
           : await callPollinationsAgent(agent, buildChildProfilePrompt(input), controller.signal);
-      return sanitizeProfile(parseSingleFieldAnswer(raw));
+      return sanitizeProfile(parseChildProfileAnswer(raw));
     } catch (error) {
       if (isConfigurationOrQuotaError(error)) unavailableAgentIds.add(agent.id);
       console.warn("[AI] Profile agent failed, trying fallback", {
@@ -239,7 +247,7 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
         body: JSON.stringify({
           inputs: {
             documentType: input.documentType,
-            fieldName: section.title
+            fieldName: section.fieldId ?? section.title
           },
           query: buildFieldPrompt(input, section),
           response_mode: "blocking",
@@ -249,12 +257,16 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
 
       if (!response.ok) {
         output[section.title] = "Brak danych w załączonych materiałach.";
+        if (section.fieldId) output[section.fieldId] = output[section.title];
       } else {
         const data = (await response.json()) as { answer?: string };
-        output[section.title] = sanitizeFieldAnswer(data.answer, input.sourceTexts, Object.values(output));
+        const content = sanitizeFieldAnswer(data.answer, input.sourceTexts, Object.values(output));
+        output[section.title] = content;
+        if (section.fieldId) output[section.fieldId] = content;
       }
     } catch {
       output[section.title] = "Brak danych w załączonych materiałach.";
+      if (section.fieldId) output[section.fieldId] = output[section.title];
     } finally {
       clearTimeout(timeout);
     }
@@ -307,6 +319,7 @@ function repairGeneratedSections(sections: Record<string, string>) {
 
 function sectionGenerationKey(section: TemplateSection) {
   if (section.marker !== "TEKST") return "";
+  if (section.fieldId) return section.fieldId;
   return [section.parentHeading, section.pointNumber, section.instruction]
     .filter(Boolean)
     .join("|")
@@ -479,11 +492,26 @@ function parseSingleFieldAnswer(text: string) {
   }
 }
 
+function parseChildProfileAnswer(text: string) {
+  const cleaned = text.trim();
+  try {
+    const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const candidate = fenced?.[1] || extractBalancedJsonObject(cleaned) || cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    const profile = parsed.childProfile ?? parsed.profile ?? parsed.ChildProfile;
+    if (typeof profile === "string") return profile;
+    if (profile && typeof profile === "object") return JSON.stringify(profile, null, 2);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return cleaned;
+  }
+}
+
 function buildChildProfilePrompt(input: GenerationInput) {
   return [
     "Na podstawie wszystkich załączonych dokumentów utwórz uporządkowany profil funkcjonowania dziecka. Nie pomijaj istotnych informacji. Połącz informacje z wielu źródeł. Usuń duplikaty. Jeżeli informacje się uzupełniają, scal je. Jeżeli są sprzeczne, oznacz je jako wymagające weryfikacji. Nie dodawaj informacji spoza dokumentów.",
     "",
-    "Zwróć JSON w formacie: {\"profile\":\"profil dziecka z zachowaniem numerowanych sekcji\"}.",
+    "Zwróć JSON w formacie: {\"childProfile\":{\"danePodstawowe\":{},\"komunikacja\":{},\"funkcjonowanieSpoleczne\":{},\"emocje\":{},\"motorykaDuza\":{},\"motorykaMala\":{},\"grafomotoryka\":{},\"koordynacjaWzrokowoRuchowa\":{},\"percepcjaWzrokowa\":{},\"samodzielnosc\":{},\"mocneStrony\":[],\"trudnosci\":[],\"potrzeby\":[],\"zaleceniaZeZrodel\":[]}}.",
     "",
     "Profil ma zawierać sekcje:",
     "1. Dane podstawowe",
@@ -554,6 +582,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
     input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "",
     "",
     "Wypełniasz dokładnie jedno miejsce oznaczone w aktywnym wzorze jako Tekst, tekst albo - tekst.",
+    `Pole: ${section.fieldId ?? section.title}`,
     `Sekcja: ${section.parentHeading || inferWwrSection(section) || "nieustalona"}`,
     `Punkt/podpunkt: ${section.pointNumber || "brak numeru"}`,
     `Pytanie ze wzoru: ${section.instruction ?? section.title}`,
@@ -754,7 +783,7 @@ function shouldExpandField(section: TemplateSection, answer: string, sourceTexts
 function findShortGeneratedFields(sections: TemplateSection[], aiSections?: Record<string, string>, sourceTexts?: string[]) {
   if (!aiSections) return [];
   return sections
-    .filter((section) => shouldExpandField(section, aiSections[section.title] ?? "", sourceTexts))
+    .filter((section) => shouldExpandField(section, (section.fieldId ? aiSections[section.fieldId] : "") || aiSections[section.title] || "", sourceTexts))
     .map((section) => section.instruction ?? section.title);
 }
 

@@ -2,7 +2,7 @@ import AdmZip from "adm-zip";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { DocumentTemplate } from "../generated/prisma/client";
-import { asTemplateSections, isTextMarker, type TemplateSection } from "./document-knowledge";
+import { asTemplateSections, extractDocxTemplateSections, isTextMarker, type TemplateSection } from "./document-knowledge";
 
 type GeneratedDocxInput = {
   documentId: string;
@@ -18,7 +18,10 @@ type DocxBuildResult = {
 export async function buildDocxFromTemplate(input: GeneratedDocxInput) {
   if (!isDocxTemplate(input.template)) return null;
 
-  const sections = asTemplateSections(input.template.sections);
+  let sections = asTemplateSections(input.template.sections);
+  if (!sections.some((section) => section.marker === "TEKST")) {
+    sections = extractDocxTemplateSections(input.template.storagePath);
+  }
   const zip = new AdmZip(input.template.storagePath);
   const documentEntry = zip.getEntry("word/document.xml");
   if (!documentEntry) return null;
@@ -58,7 +61,7 @@ function fillDocumentXml(xml: string, sections: TemplateSection[], aiSections: R
     }
     if (signature) lastSignature = signature;
 
-    const content = section ? aiSections[section.title] : "";
+    const content = section ? (section.fieldId ? aiSections[section.fieldId] : "") || aiSections[section.title] : "";
     return replaceParagraphText(paragraph, content || "Brak danych w załączonych materiałach.", isListParagraph(paragraph));
   });
 }
@@ -120,6 +123,8 @@ function validateGeneratedDocxXml(originalXml: string, filledXml: string) {
   const originalParagraphs = countParagraphs(originalXml);
   const filledParagraphs = countParagraphs(filledXml);
   const paragraphTexts = extractParagraphTexts(filledXml);
+  const originalHeadings = extractHeadingLikeParagraphTexts(originalXml);
+  const filledHeadings = extractHeadingLikeParagraphTexts(filledXml);
   const text = paragraphTexts.join("\n");
 
   if (paragraphTexts.some((paragraph) => isTextMarker(paragraph))) {
@@ -136,6 +141,10 @@ function validateGeneratedDocxXml(originalXml: string, filledXml: string) {
     errors.push("Liczba akapitów w DOCX jest znacząco mniejsza niż we wzorze.");
   }
 
+  if (originalHeadings.length && filledHeadings.length < originalHeadings.length) {
+    errors.push("Liczba nagłówków w DOCX jest mniejsza niż we wzorze.");
+  }
+
   if (paragraphTexts.some((paragraph) => paragraph.length > 2500)) {
     errors.push("W DOCX wykryto akapit dłuższy niż 2500 znaków, co sugeruje sklejenie tekstu.");
   }
@@ -149,6 +158,13 @@ function countParagraphs(xml: string) {
 
 function extractParagraphTexts(xml: string) {
   return [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)]
+    .map((match) => extractParagraphText(match[0]))
+    .filter(Boolean);
+}
+
+function extractHeadingLikeParagraphTexts(xml: string) {
+  return [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)]
+    .filter((match) => /<w:pStyle\b[^>]*w:val="[^"]*(?:Heading|Naglowek|Nagłówek|Tytul|Tytuł)[^"]*"/i.test(match[0]))
     .map((match) => extractParagraphText(match[0]))
     .filter(Boolean);
 }

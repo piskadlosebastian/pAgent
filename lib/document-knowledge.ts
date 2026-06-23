@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import AdmZip from "adm-zip";
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 import WordExtractor from "word-extractor";
@@ -19,6 +20,7 @@ export type TemplateSection = {
   instruction?: string;
   parentHeading?: string;
   pointNumber?: string;
+  fieldId?: string;
 };
 
 export type ValidationReport = {
@@ -105,6 +107,18 @@ export async function extractPlainText(storagePath: string, mimeType?: string | 
   return "";
 }
 
+export function extractDocxTemplateSections(storagePath: string): TemplateSection[] {
+  try {
+    const zip = new AdmZip(storagePath);
+    const documentEntry = zip.getEntry("word/document.xml");
+    if (!documentEntry) return [];
+    const paragraphs = extractDocxParagraphTexts(documentEntry.getData().toString("utf8"));
+    return extractTextMarkerSections(paragraphs);
+  } catch {
+    return [];
+  }
+}
+
 export function extractTemplateSections(text: string): TemplateSection[] {
   const lines = normalizeText(text).split("\n");
   const textMarkerSections = extractTextMarkerSections(lines);
@@ -187,7 +201,7 @@ export function composeFromTemplate(input: {
   const sectionContent = Object.fromEntries(
     sections.map((section) => [
       section.title,
-      input.aiSections?.[section.title]?.trim() || (isMarkerTemplate ? missingFieldContent() : builtinSectionContent(section.title, input))
+      getGeneratedSectionContent(section, input.aiSections) || (isMarkerTemplate ? missingFieldContent() : builtinSectionContent(section.title, input))
     ])
   );
   const filled = fillTemplateText(input.template.extractedText, sections, sectionContent);
@@ -197,6 +211,11 @@ export function composeFromTemplate(input: {
 
 function missingFieldContent() {
   return "Brak danych w załączonych materiałach.";
+}
+
+function getGeneratedSectionContent(section: TemplateSection, aiSections?: Record<string, string>) {
+  if (!aiSections) return "";
+  return (section.fieldId ? aiSections[section.fieldId]?.trim() : "") || aiSections[section.title]?.trim() || "";
 }
 
 export function validateAgainstTemplate(content: string, template: Pick<DocumentTemplate, "sections">): ValidationReport {
@@ -247,15 +266,22 @@ export function validateAgainstTemplate(content: string, template: Pick<Document
 export function asTemplateSections(value: unknown): TemplateSection[] {
   if (Array.isArray(value)) {
     return value
-      .map((item): TemplateSection => ({
-        title: typeof item?.title === "string" ? repairTemplateContextText(item.title) : "",
-        required: item?.required !== false,
-        marker: item?.marker === "TEKST" ? "TEKST" as const : undefined,
-        occurrence: typeof item?.occurrence === "number" ? item.occurrence : undefined,
-        instruction: typeof item?.instruction === "string" ? repairTemplateContextText(item.instruction) : undefined,
-        parentHeading: typeof item?.parentHeading === "string" ? repairTemplateContextText(item.parentHeading) : undefined,
-        pointNumber: typeof item?.pointNumber === "string" ? item.pointNumber : undefined
-      }))
+      .map((item): TemplateSection => {
+        const section = {
+          title: typeof item?.title === "string" ? repairTemplateContextText(item.title) : "",
+          required: item?.required !== false,
+          marker: item?.marker === "TEKST" ? "TEKST" as const : undefined,
+          occurrence: typeof item?.occurrence === "number" ? item.occurrence : undefined,
+          instruction: typeof item?.instruction === "string" ? repairTemplateContextText(item.instruction) : undefined,
+          parentHeading: typeof item?.parentHeading === "string" ? repairTemplateContextText(item.parentHeading) : undefined,
+          pointNumber: typeof item?.pointNumber === "string" ? item.pointNumber : undefined,
+          fieldId: typeof item?.fieldId === "string" ? item.fieldId : undefined
+        };
+        return {
+          ...section,
+          fieldId: section.fieldId ?? inferWwrFieldId(section)
+        };
+      })
       .filter((item) => item.title);
   }
   return [];
@@ -361,6 +387,7 @@ function extractTextMarkerSections(lines: string[]): TemplateSection[] {
     const instruction = repairTemplateContextText(findNearestInstructionAbove(lines, index) ?? `Pole tekst ${occurrence}`);
     const parentHeading = findParentHeadingAbove(lines, index, instruction);
     const pointNumber = extractPointNumber(instruction);
+    const fieldId = inferWwrFieldId({ instruction, parentHeading, pointNumber, occurrence });
     sections.push({
       title: `${instruction} [TEKST ${occurrence}]`,
       required: true,
@@ -368,11 +395,31 @@ function extractTextMarkerSections(lines: string[]): TemplateSection[] {
       occurrence,
       instruction,
       parentHeading: parentHeading ? repairTemplateContextText(parentHeading) : undefined,
-      pointNumber
+      pointNumber,
+      fieldId
     });
   }
 
   return sections;
+}
+
+export function inferWwrFieldId(section: Pick<TemplateSection, "instruction" | "parentHeading" | "pointNumber" | "occurrence"> & { title?: string }) {
+  const text = normalizeForFieldId([section.parentHeading, section.pointNumber, section.instruction, section.title].filter(Boolean).join(" "));
+
+  if (hasAny(text, ["mozliwosci psychofizycz", "potencjale rozwoj", "mocnych stron", "uzdolnien"])) return "diagnoza_potencjal";
+  if (hasAny(text, ["zasobach w srodowisku", "srodowisku opieki", "wychowania i nauczania"])) return "diagnoza_zasoby";
+  if (hasAny(text, ["barierach", "ograniczeniach", "wplywajacych na funkcjonowanie"])) return "diagnoza_bariery";
+  if (hasAny(text, ["warunki i formy wsparcia", "formy wsparcia indywidualnych potrzeb", "indywidualnych potrzeb dziecka"])) return "zalecenia_wsparcie";
+  if (hasAny(text, ["przejscia do edukacji szkolnej", "edukacji szkolnej"])) return "zalecenia_przejscie_szkolne";
+  if (hasAny(text, ["wykorzystania i wzmacniania zasobow", "wzmacniania zasobow dziecka"])) return "zalecenia_wzmacnianie_zasobow";
+  if (hasAny(text, ["usuwania barier"]) && hasAny(text, ["wwr", "wczesnego wspomagania"])) return "zalecenia_wwr";
+  if (hasAny(text, ["usuwania barier"]) && hasAny(text, ["wychowania przedszkolnego", "przedszkol"])) return "zalecenia_przedszkole";
+  if (hasAny(text, ["inne formy wsparcia dziecka", "inne formy wsparcia", "wsparcia dziecka i rodziny"])) return "zalecenia_inne";
+  if (hasAny(text, ["aac", "alternatywn", "wspomagajac", "migow"])) return "aac";
+  if (hasAny(text, ["okolicznosci wydania nowej opinii", "nowej opinii", "nowa opinia"])) return "nowa_opinia";
+  if (hasAny(text, ["inne informacje", "dodatkowe informacje"])) return "inne";
+
+  return section.occurrence ? `pole_${section.occurrence}` : undefined;
 }
 
 function fillTextMarkers(templateText: string, sections: TemplateSection[], sectionContent: Record<string, string>) {
@@ -533,6 +580,43 @@ function isEmptyTemplateBody(body: string) {
 
 function normalizeText(text: string) {
   return text.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function extractDocxParagraphTexts(xml: string) {
+  return [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)]
+    .map((match) => extractDocxParagraphText(match[0]))
+    .filter((paragraph) => paragraph.length > 0);
+}
+
+function extractDocxParagraphText(paragraph: string) {
+  return [...paragraph.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)]
+    .map((match) => decodeXml(match[1]))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeXml(value: string) {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function normalizeForFieldId(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasAny(text: string, fragments: string[]) {
+  return fragments.some((fragment) => text.includes(fragment));
 }
 
 function tokenize(text: string) {

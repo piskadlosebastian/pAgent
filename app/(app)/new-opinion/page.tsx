@@ -122,18 +122,19 @@ export default function NewOpinionPage() {
     const document = await response.json();
     setCreatedDocument(document);
     setGeneratedContent(document.generatedContent ?? "");
-    setMessage("Dokument jest gotowy do sprawdzenia.");
+    setMessage("Dokument został wygenerowany i jest gotowy do weryfikacji.");
   }
 
   const steps = ["Dane dziecka", "Typ i wzór", "Dokumenty źródłowe", "Generowanie", "Weryfikacja"];
   const generationSteps = [
-    "Odczytywanie dokumentów",
-    "Tworzenie profilu dziecka",
-    "Dopasowywanie treści do pól wzoru",
-    "Generowanie rozbudowanych opisów",
-    "Sprawdzanie jakości i uzupełnień",
-    "Finalizowanie dokumentu i pliku DOCX"
+    "Krok 1/6 - Odczytywanie dokumentów",
+    "Krok 2/6 - Tworzenie profilu dziecka",
+    "Krok 3/6 - Analiza wzoru",
+    "Krok 4/6 - Generowanie treści",
+    "Krok 5/6 - Składanie dokumentu",
+    "Krok 6/6 - Kontrola jakości"
   ];
+  const generationPercent = Math.round(((generationStep + 1) / generationSteps.length) * 100);
   const currentStep = generatedContent ? 4 : createdDocument?.files?.length ? 3 : createdDocument ? 2 : childId ? 1 : 0;
 
   return (
@@ -149,8 +150,9 @@ export default function NewOpinionPage() {
               <p>Analizujemy załączone materiały, łączymy informacje i uzupełniamy wzór opinii. To może potrwać chwilę.</p>
             </div>
             <div className="generation-progress" aria-hidden>
-              <span style={{ width: `${Math.max(12, ((generationStep + 1) / generationSteps.length) * 100)}%` }} />
+              <span style={{ width: `${Math.max(12, generationPercent)}%` }} />
             </div>
+            <p className="muted" style={{ fontSize: "12px", margin: 0 }}>{generationPercent}% wykonania</p>
             <ol className="generation-steps">
               {generationSteps.map((step, index) => (
                 <li className={index < generationStep ? "done" : index === generationStep ? "active" : ""} key={step}>

@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { documentTemplateSchema } from "@/lib/validators";
-import { extractPlainText, extractTemplateSections, fileHasExtension } from "@/lib/document-knowledge";
+import { extractDocxTemplateSections, extractPlainText, extractTemplateSections, fileHasExtension } from "@/lib/document-knowledge";
 import { writeAuditLog } from "@/lib/audit";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -46,7 +46,8 @@ export async function POST(request: Request) {
   await writeFile(storagePath, Buffer.from(await file.arrayBuffer()));
 
   const extractedText = await extractPlainText(storagePath, file.type, file.name);
-  const sections = extractTemplateSections(extractedText);
+  const docxSections = fileHasExtension(file.name, [".docx"]) ? extractDocxTemplateSections(storagePath) : [];
+  const sections = docxSections.length ? docxSections : extractTemplateSections(extractedText);
 
   if (parsed.data.active) {
     await prisma.documentTemplate.updateMany({
