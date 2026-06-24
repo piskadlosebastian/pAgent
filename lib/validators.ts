@@ -37,3 +37,17 @@ export const passwordChangeSchema = z.object({
   currentPassword: z.string().min(8),
   newPassword: z.string().min(10).max(120)
 });
+
+export const adminCreateUserSchema = z.object({
+  email: z.string().email().max(180),
+  name: z.string().max(160).optional().nullable(),
+  role: z.enum(["USER", "ADMIN"]).default("USER"),
+  password: z.string().min(10).max(120)
+});
+
+export const adminUpdateUserSchema = z.object({
+  email: z.string().email().max(180),
+  name: z.string().max(160).optional().nullable(),
+  role: z.enum(["USER", "ADMIN"]).default("USER"),
+  password: z.string().min(10).max(120).optional().or(z.literal(""))
+});
