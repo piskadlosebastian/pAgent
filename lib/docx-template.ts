@@ -2,7 +2,7 @@ import AdmZip from "adm-zip";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { DocumentTemplate } from "../generated/prisma/client";
-import { asTemplateSections, extractDocxTemplateSections, isTextMarker, type TemplateSection } from "./document-knowledge";
+import { asTemplateSections, extractDocxTemplateSections, isTextMarker, repairGluedPolishTextPreservingLayout, type TemplateSection } from "./document-knowledge";
 
 type GeneratedDocxInput = {
   documentId: string;
@@ -77,26 +77,41 @@ function extractParagraphText(paragraph: string) {
 function replaceParagraphText(paragraph: string, replacement: string, preferList = false) {
   const textMatches = [...paragraph.matchAll(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g)];
   if (!textMatches.length) return paragraph;
-  const blocks = splitReplacementBlocks(replacement, preferList);
+  const blocks = splitReplacementBlocks(repairDocxReplacementText(replacement), preferList);
   if (!blocks.length) return "";
 
   return blocks.map((block) => replaceParagraphWithSingleBlock(paragraph, block)).join("");
 }
 
 function replaceParagraphWithSingleBlock(paragraph: string, replacement: string) {
-  const paragraphOpen = paragraph.match(/^<w:p\b([^>]*)>/)?.[1] ?? "";
-  const paragraphProperties = paragraph.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] ?? "";
-  const runProperties = paragraph.match(/<w:r\b[^>]*>[\s\S]*?(<w:rPr\b[\s\S]*?<\/w:rPr>)/)?.[1] ?? "";
+  let replacedFirstRun = false;
+  return paragraph.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+    if (!/<w:t\b[\s\S]*?<\/w:t>/.test(run)) return run;
+    if (replacedFirstRun) return "";
+    replacedFirstRun = true;
+    return run.replace(/<w:t\b([^>]*)>[\s\S]*?<\/w:t>/, (_match, attrs: string) => {
+      return `<w:t${ensurePreserveSpace(attrs)}>${escapeXml(replacement)}</w:t>`;
+    });
+  });
+}
 
-  return [
-    `<w:p${paragraphOpen}>`,
-    paragraphProperties,
-    "<w:r>",
-    runProperties,
-    `<w:t xml:space="preserve">${escapeXml(replacement)}</w:t>`,
-    "</w:r>",
-    "</w:p>"
-  ].join("");
+function repairDocxReplacementText(value: string) {
+  return repairGluedPolishTextPreservingLayout(value)
+    .replace(/([a-ząćęłńóśźż])([A-ZĄĆĘŁŃÓŚŹŻ])/g, "$1 $2")
+    .replace(/([a-ząćęłńóśźż])(?=(?:oraz|albo|lub|który|która|które|jego|jej|ich|dziecka|ucznia|środowisku|występujących|uwzględnieniem|ramach|zakresie|procesie|edukacji|funkcjonowaniu|rozwoju|komunikacji|wsparcia|potrzeb|barier|zaleceń|diagnozy)\b)/gi, "$1 ")
+    .replace(/\bzuwzględnieniem\b/gi, "z uwzględnieniem")
+    .replace(/\bwramach\b/gi, "w ramach")
+    .replace(/\bwewspółpracy\b/gi, "we współpracy")
+    .replace(/\bdopracy\b/gi, "do pracy")
+    .replace(/\bnapodstawie\b/gi, "na podstawie")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([,.;:!?])(?=\S)/g, "$1 ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function ensurePreserveSpace(attrs: string) {
+  return /\bxml:space=/.test(attrs) ? attrs : `${attrs} xml:space="preserve"`;
 }
 
 function splitReplacementBlocks(replacement: string, preferList: boolean) {
