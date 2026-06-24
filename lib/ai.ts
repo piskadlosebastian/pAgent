@@ -655,6 +655,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
     "- nie dodawaj sekcji, nagłówków ani punktów spoza wzoru;",
     "- nie zmieniaj struktury wzoru;",
     "- nie dodawaj nagłówków, numerów punktów, komentarzy technicznych ani instrukcji dla AI;",
+    "- nie używaj markdownu: bez **pogrubień**, bez śródtytułów i bez etykiet typu **Rozwój językowy** –;",
     "- nie używaj fraz: Materiał źródłowy, Brak przykładów wzorcowych, Treść wymaga uzupełnienia, Plik ...;",
     "- jeśli materiały nie zawierają danych dla tego pola, zwróć dokładnie: Brak danych w załączonych materiałach.",
     "",
@@ -665,7 +666,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
 }
 
 function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], previousAnswers: string[] = []) {
-  const cleaned = ensureReadableFieldLayout(repairGluedPolishTextPreservingLayout((answer ?? "")
+  const cleaned = stripMarkdownDecorations(ensureReadableFieldLayout(repairGluedPolishTextPreservingLayout((answer ?? "")
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -677,13 +678,25 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], pre
     .replace(/Treść wymaga uzupełnienia[^.\n]*(\.|\n)?/gi, "")
     .replace(/^Plik\s+[^:\n]+:\s*/gim, "")
     .replace(/\n{3,}/g, "\n\n")
-    .trim()));
+    .trim())));
 
   if (hasCopiedSourceFragment(cleaned, sourceTexts) || repeatsPreviousAnswer(cleaned, previousAnswers)) {
     return "Brak danych w załączonych materiałach.";
   }
 
   return cleaned || "Brak danych w załączonych materiałach.";
+}
+
+function stripMarkdownDecorations(answer: string) {
+  return answer
+    .replace(/\*\*([^*\n]{2,80})\*\*\s*[-–—:]\s*/g, "")
+    .replace(/\*\*([^*\n]{2,80})\*\*/g, "$1")
+    .replace(/__([^_\n]{2,80})__\s*[-–—:]\s*/g, "")
+    .replace(/__([^_\n]{2,80})__/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+\*\*([^*\n]{2,80})\*\*\s*[-–—:]\s*/gm, "- ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 function ensureReadableFieldLayout(answer: string) {
