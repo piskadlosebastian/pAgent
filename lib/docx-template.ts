@@ -51,13 +51,17 @@ function fillDocumentXml(xml: string, sections: TemplateSection[], aiSections: R
 
   return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) => {
     const text = extractParagraphText(paragraph);
+    const technicalKeys = extractTechnicalPlaceholderKeys(text);
+    if (technicalKeys.length) {
+      return replaceTechnicalPlaceholders(paragraph, text, technicalKeys, aiSections, isListParagraph(paragraph));
+    }
     if (!isTextMarker(text)) return paragraph;
 
     occurrence += 1;
-    const section = sections.find((item) => item.occurrence === occurrence);
+    const section = sections.find((item) => item.marker === "TEKST" && item.occurrence === occurrence);
     const signature = sectionSignature(section);
     if (signature && signature === lastSignature) {
-      return "";
+      return clearParagraphText(paragraph);
     }
     if (signature) lastSignature = signature;
 
@@ -78,9 +82,25 @@ function replaceParagraphText(paragraph: string, replacement: string, preferList
   const textMatches = [...paragraph.matchAll(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g)];
   if (!textMatches.length) return paragraph;
   const blocks = splitReplacementBlocks(repairDocxReplacementText(replacement), preferList);
-  if (!blocks.length) return "";
+  if (!blocks.length) return clearParagraphText(paragraph);
 
   return blocks.map((block) => replaceParagraphWithSingleBlock(paragraph, block)).join("");
+}
+
+function replaceTechnicalPlaceholders(
+  paragraph: string,
+  text: string,
+  keys: string[],
+  aiSections: Record<string, string>,
+  preferList: boolean
+) {
+  const replacementText = keys.reduce((output, key) => {
+    const value = aiSections[key] ?? aiSections[normalizeTechnicalKey(key)] ?? "";
+    return output.replace(new RegExp(`\\{\\{\\s*${escapeRegExp(key)}\\s*\\}\\}`, "gi"), value || "Brak danych w załączonych materiałach.");
+  }, text);
+
+  const placeholderOnly = /^\s*\{\{\s*[\wąćęłńóśźżĄĆĘŁŃÓŚŹŻ-]+\s*\}\}\s*$/.test(text);
+  return replaceParagraphText(paragraph, replacementText, preferList && placeholderOnly);
 }
 
 function replaceParagraphWithSingleBlock(paragraph: string, replacement: string) {
@@ -112,6 +132,29 @@ function repairDocxReplacementText(value: string) {
 
 function ensurePreserveSpace(attrs: string) {
   return /\bxml:space=/.test(attrs) ? attrs : `${attrs} xml:space="preserve"`;
+}
+
+function clearParagraphText(paragraph: string) {
+  let clearedFirstText = false;
+  return paragraph.replace(/<w:t\b([^>]*)>[\s\S]*?<\/w:t>/g, (_match, attrs: string) => {
+    if (clearedFirstText) return "";
+    clearedFirstText = true;
+    return `<w:t${ensurePreserveSpace(attrs)}></w:t>`;
+  });
+}
+
+function extractTechnicalPlaceholderKeys(text: string) {
+  return [...text.matchAll(/\{\{\s*([a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ-]+)\s*\}\}/g)]
+    .map((match) => match[1])
+    .filter(Boolean);
+}
+
+function normalizeTechnicalKey(key: string) {
+  return key.trim().toLowerCase().replace(/-/g, "_");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function splitReplacementBlocks(replacement: string, preferList: boolean) {
@@ -148,14 +191,33 @@ function validateGeneratedDocxXml(originalXml: string, filledXml: string) {
   const paragraphTexts = extractParagraphTexts(filledXml);
   const originalHeadings = extractHeadingLikeParagraphTexts(originalXml);
   const filledHeadings = extractHeadingLikeParagraphTexts(filledXml);
+  const originalNumberedParagraphs = countNumberedParagraphs(originalXml);
+  const filledNumberedParagraphs = countNumberedParagraphs(filledXml);
+  const originalText = extractParagraphTexts(originalXml).join("\n");
   const text = paragraphTexts.join("\n");
 
   if (paragraphTexts.some((paragraph) => isTextMarker(paragraph))) {
     errors.push("W wygenerowanym DOCX nadal występuje placeholder Tekst/tekst.");
   }
 
-  for (const requiredSection of ["Diagnoza", "Zalecenia", "Dodatkowe informacje"]) {
-    if (!text.toLowerCase().includes(requiredSection.toLowerCase())) {
+  if (text.includes("{{") || text.includes("}}")) {
+    errors.push("W wygenerowanym DOCX nadal występują techniczne placeholdery {{ }}.");
+  }
+
+  for (const phrase of forbiddenGluedPhrases()) {
+    if (text.toLowerCase().includes(phrase.toLowerCase())) {
+      errors.push(`W DOCX wykryto sklejoną frazę: ${phrase}.`);
+    }
+  }
+
+  for (const forbiddenPhrase of forbiddenAiCommentPhrases()) {
+    if (text.toLowerCase().includes(forbiddenPhrase.toLowerCase())) {
+      errors.push(`W DOCX wykryto niedozwolony komentarz techniczny: ${forbiddenPhrase}.`);
+    }
+  }
+
+  for (const requiredSection of ["Diagnoza", "Zalecenia", "Dodatkowe informacje", "Podpisy członków zespołu orzekającego", "Otrzymuje"]) {
+    if (originalText.toLowerCase().includes(requiredSection.toLowerCase()) && !text.toLowerCase().includes(requiredSection.toLowerCase())) {
       errors.push(`Brakuje sekcji wzoru: ${requiredSection}.`);
     }
   }
@@ -168,6 +230,14 @@ function validateGeneratedDocxXml(originalXml: string, filledXml: string) {
     errors.push("Liczba nagłówków w DOCX jest mniejsza niż we wzorze.");
   }
 
+  if (originalNumberedParagraphs && filledNumberedParagraphs < originalNumberedParagraphs) {
+    errors.push("Liczba akapitów numerowanych w DOCX jest mniejsza niż we wzorze.");
+  }
+
+  if (hasVisibleNumbering(originalXml) && !hasVisibleNumbering(filledXml)) {
+    errors.push("W DOCX zniknęła widoczna numeracja punktów lub podpunktów.");
+  }
+
   if (paragraphTexts.some((paragraph) => paragraph.length > 2500)) {
     errors.push("W DOCX wykryto akapit dłuższy niż 2500 znaków, co sugeruje sklejenie tekstu.");
   }
@@ -177,6 +247,37 @@ function validateGeneratedDocxXml(originalXml: string, filledXml: string) {
 
 function countParagraphs(xml: string) {
   return (xml.match(/<w:p\b/g) ?? []).length;
+}
+
+function countNumberedParagraphs(xml: string) {
+  return (xml.match(/<w:numPr\b/g) ?? []).length;
+}
+
+function hasVisibleNumbering(xml: string) {
+  const text = extractParagraphTexts(xml).join("\n");
+  return /(?:^|\n)\s*(?:\d+[\).]|[a-z]\))\s+/i.test(text);
+}
+
+function forbiddenGluedPhrases() {
+  return [
+    "poziomfunkcjonowania",
+    "potencjalerozwojowym",
+    "usuwaniabarier",
+    "Dzieckoposługuje",
+    "należywskazać",
+    "zespołuorzekającego",
+    "zespoluorzekajacego",
+    "innaformawychowania"
+  ];
+}
+
+function forbiddenAiCommentPhrases() {
+  return [
+    "Dokument wymaga weryfikacji",
+    "Treść wymaga uzupełnienia",
+    "Materiał źródłowy",
+    "Brak przykładów wzorcowych"
+  ];
 }
 
 function extractParagraphTexts(xml: string) {

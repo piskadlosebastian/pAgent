@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/session";
 import { documentTemplateSchema } from "@/lib/validators";
 import { extractDocxTemplateSections, extractPlainText, extractTemplateSections, fileHasExtension } from "@/lib/document-knowledge";
 import { writeAuditLog } from "@/lib/audit";
+import { convertDocToDocx } from "@/lib/office-convert";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const DOC_MIME = "application/msword";
@@ -39,14 +40,36 @@ export async function POST(request: Request) {
   }
   if (file.size > MAX_FILE_SIZE) return NextResponse.json({ error: "Plik przekracza limit 12 MB." }, { status: 400 });
 
-  const storedName = `${randomUUID()}-${file.name.replace(/[^a-z0-9._-]+/gi, "_")}`;
+  let storedName = `${randomUUID()}-${file.name.replace(/[^a-z0-9._-]+/gi, "_")}`;
   const directory = path.join(process.cwd(), "storage", "templates", user.organizationId ?? user.id);
   await mkdir(directory, { recursive: true });
-  const storagePath = path.join(directory, storedName);
+  let storagePath = path.join(directory, storedName);
   await writeFile(storagePath, Buffer.from(await file.arrayBuffer()));
+  let mimeType = file.type || "application/octet-stream";
+  let size = file.size;
 
-  const extractedText = await extractPlainText(storagePath, file.type, file.name);
-  const docxSections = fileHasExtension(file.name, [".docx"]) ? extractDocxTemplateSections(storagePath) : [];
+  if (fileHasExtension(file.name, [".doc"]) || file.type === DOC_MIME) {
+    let converted: Awaited<ReturnType<typeof convertDocToDocx>>;
+    try {
+      converted = await convertDocToDocx(storagePath, directory);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: error instanceof Error
+            ? error.message
+            : "Nie udało się przekonwertować wzoru DOC do DOCX."
+        },
+        { status: 422 }
+      );
+    }
+    storagePath = converted.path;
+    storedName = converted.storedName;
+    mimeType = DOCX_MIME;
+    size = converted.size;
+  }
+
+  const extractedText = await extractPlainText(storagePath, mimeType, storedName);
+  const docxSections = extractDocxTemplateSections(storagePath);
   const sections = docxSections.length ? docxSections : extractTemplateSections(extractedText);
 
   if (parsed.data.active) {
@@ -64,8 +87,8 @@ export async function POST(request: Request) {
       status: parsed.data.active ? "ACTIVE" : "ARCHIVED",
       originalName: file.name,
       storedName,
-      mimeType: file.type || "application/octet-stream",
-      size: file.size,
+      mimeType,
+      size,
       storagePath,
       extractedText,
       sections,
