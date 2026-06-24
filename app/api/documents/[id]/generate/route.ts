@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { generateOpinionDraft } from "@/lib/ai";
+import { getAiAgent } from "@/lib/ai-agents";
 import { buildDocxFromTemplate } from "@/lib/docx-template";
 import { buildKnowledgeQuery, extractPlainText, findSimilarExamples, inferPppType } from "@/lib/document-knowledge";
 import { prisma } from "@/lib/prisma";
@@ -74,6 +75,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   const organization = user.organizationId
     ? await prisma.organization.findUnique({ where: { id: user.organizationId }, select: { aiProvider: true } })
     : null;
+  const selectedAgent = getAiAgent(organization?.aiProvider);
 
   const generated = await generateOpinionDraft({
     child: document.child,
@@ -105,7 +107,13 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       forbiddenPhrases: []
     }),
     generatedDocxPath,
-    docxValidationErrors
+    docxValidationErrors,
+    aiAgent: {
+      id: selectedAgent.id,
+      name: selectedAgent.name,
+      provider: selectedAgent.provider,
+      model: selectedAgent.model ?? null
+    }
   };
   const isValid = Boolean(generated.validationReport?.valid) && docxValidationErrors.length === 0;
 

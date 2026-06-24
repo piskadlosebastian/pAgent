@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Download, FileUp, LoaderCircle, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, LoaderCircle, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 
 type WizardStep = "child" | "files" | "preview";
 
@@ -22,10 +22,24 @@ type CreatedDocument = {
   title: string;
   generatedContent?: string | null;
   validationStatus?: "NOT_VALIDATED" | "VALID" | "NEEDS_FIX";
+  validationReport?: {
+    aiAgent?: {
+      name?: string;
+      provider?: string;
+      model?: string | null;
+    };
+  } | null;
   files?: UploadedItem[];
 };
 
-const NEW_CHILD_VALUE = "__new_child__";
+const generationSteps = [
+  "Krok 1/6 - Odczytywanie dokumentów",
+  "Krok 2/6 - Tworzenie profilu dziecka",
+  "Krok 3/6 - Analiza wzoru",
+  "Krok 4/6 - Generowanie treści",
+  "Krok 5/6 - Składanie dokumentu",
+  "Krok 6/6 - Kontrola jakości"
+];
 
 export default function NewOpinionPage() {
   const [children, setChildren] = useState<ChildItem[]>([]);
@@ -248,56 +262,63 @@ export default function NewOpinionPage() {
           <>
             <div className="field">
               <label>Dziecko</label>
-              <select
-                className="select"
-                value={childMode === "new" ? NEW_CHILD_VALUE : childId}
-                onChange={(event) => {
-                  if (event.target.value === NEW_CHILD_VALUE) {
-                    setChildMode("new");
-                    return;
-                  }
-                  setChildMode("existing");
-                  setChildId(event.target.value);
-                }}
-              >
-                {children.map((child) => (
-                  <option key={child.id} value={child.id}>{child.firstName} {child.lastName}</option>
-                ))}
-                <option value={NEW_CHILD_VALUE}>Dodaj nowe dziecko</option>
-              </select>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button className={`button ${childMode === "existing" ? "accent" : "secondary"}`} type="button" onClick={() => setChildMode("existing")} disabled={!children.length}>
+                  Wybierz z bazy
+                </button>
+                <button className={`button ${childMode === "new" ? "accent" : "secondary"}`} type="button" onClick={() => setChildMode("new")}>
+                  Nowe dziecko
+                </button>
+              </div>
             </div>
 
-            {childMode === "new" ? (
-              <div className="grid grid-2">
-                <div className="field">
-                  <label>Imię</label>
-                  <input className="input" value={newChild.firstName} onChange={(event) => updateNewChild("firstName", event.target.value)} />
-                </div>
-                <div className="field">
-                  <label>Nazwisko</label>
-                  <input className="input" value={newChild.lastName} onChange={(event) => updateNewChild("lastName", event.target.value)} />
-                </div>
-                <div className="field">
-                  <label>Data urodzenia</label>
-                  <input className="input" type="date" value={newChild.birthDate} onChange={(event) => updateNewChild("birthDate", event.target.value)} />
-                </div>
-                <div className="field">
-                  <label>Placówka</label>
-                  <input className="input" value={newChild.school} onChange={(event) => updateNewChild("school", event.target.value)} />
-                </div>
-                <div className="field">
-                  <label>Klasa/grupa</label>
-                  <input className="input" value={newChild.classGroup} onChange={(event) => updateNewChild("classGroup", event.target.value)} />
-                </div>
-                <div className="field">
-                  <label>Rodzice/opiekunowie</label>
-                  <input className="input" value={newChild.guardians} onChange={(event) => updateNewChild("guardians", event.target.value)} />
-                </div>
+            {childMode === "existing" ? (
+              <div className="field">
+                <label>Wybierz dziecko z bazy</label>
+                <select className="select" value={childId} onChange={(event) => setChildId(event.target.value)} disabled={!children.length}>
+                  {children.map((child) => (
+                    <option key={child.id} value={child.id}>{child.firstName} {child.lastName}</option>
+                  ))}
+                </select>
               </div>
             ) : null}
 
+            {childMode === "new" ? (
+              <>
+                <div className="alert">
+                  Wpisz dane dziecka tutaj. Po kliknięciu przycisku dziecko zostanie zapisane w bazie i od razu utworzymy dokument roboczy.
+                </div>
+                <div className="grid grid-2">
+                  <div className="field">
+                    <label>Imię</label>
+                    <input className="input" value={newChild.firstName} onChange={(event) => updateNewChild("firstName", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Nazwisko</label>
+                    <input className="input" value={newChild.lastName} onChange={(event) => updateNewChild("lastName", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Data urodzenia</label>
+                    <input className="input" type="date" value={newChild.birthDate} onChange={(event) => updateNewChild("birthDate", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Placówka</label>
+                    <input className="input" value={newChild.school} onChange={(event) => updateNewChild("school", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Klasa/grupa</label>
+                    <input className="input" value={newChild.classGroup} onChange={(event) => updateNewChild("classGroup", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Rodzice/opiekunowie</label>
+                    <input className="input" value={newChild.guardians} onChange={(event) => updateNewChild("guardians", event.target.value)} />
+                  </div>
+                </div>
+              </>
+            ) : null}
+
             <button className="button accent" type="button" onClick={saveDraft} disabled={!canSaveDraft || pending}>
-              Zapisz i przejdź do plików
+              {childMode === "new" ? "Zapisz dziecko i przejdź do plików" : "Przejdź do plików"}
             </button>
           </>
         ) : null}
@@ -347,11 +368,23 @@ export default function NewOpinionPage() {
           <>
             <div className="toolbar">
               <h2>Podgląd dokumentu</h2>
-              <a className="button secondary" href={`/api/documents/${createdDocument.id}/export`}>
-                <Download size={18} aria-hidden />
-                Pobierz DOCX
-              </a>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button className="button secondary" type="button" onClick={generateFromSources} disabled={pending || generationPending}>
+                  <RotateCcw size={18} aria-hidden />
+                  Generuj ponownie
+                </button>
+                <a className="button secondary" href={`/api/documents/${createdDocument.id}/export`}>
+                  <Download size={18} aria-hidden />
+                  Pobierz DOCX
+                </a>
+              </div>
             </div>
+            {createdDocument.validationReport?.aiAgent ? (
+              <div className="alert">
+                Dokument przygotowano za pomocą agenta: {createdDocument.validationReport.aiAgent.name}
+                {createdDocument.validationReport.aiAgent.model ? ` (${createdDocument.validationReport.aiAgent.model})` : ""}.
+              </div>
+            ) : null}
             {createdDocument.validationStatus ? (
               <div className="alert">
                 Status zgodności ze wzorem: {createdDocument.validationStatus === "VALID" ? "zgodny" : createdDocument.validationStatus === "NEEDS_FIX" ? "wymaga poprawy" : "niezwalidowany"}
@@ -369,15 +402,6 @@ export default function NewOpinionPage() {
     </div>
   );
 }
-
-const generationSteps = [
-  "Krok 1/6 - Odczytywanie dokumentów",
-  "Krok 2/6 - Tworzenie profilu dziecka",
-  "Krok 3/6 - Analiza wzoru",
-  "Krok 4/6 - Generowanie treści",
-  "Krok 5/6 - Składanie dokumentu",
-  "Krok 6/6 - Kontrola jakości"
-];
 
 function GenerationOverlay({ generationStep, generationPercent }: { generationStep: number; generationPercent: number }) {
   return (
