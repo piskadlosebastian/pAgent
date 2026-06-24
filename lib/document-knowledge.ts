@@ -529,6 +529,13 @@ export function repairGluedPolishText(value: string) {
     .replace(/\bpercepcjawzrokowa\b/gi, "percepcja wzrokowa")
     .replace(/\bfunkcjonowanieemocjonalno-społeczne\b/gi, "funkcjonowanie emocjonalno-społeczne")
     .replace(/\bfunkcjonowaniepoznawcze\b/gi, "funkcjonowanie poznawcze")
+    .replace(/\bDzieckoposługuje\b/g, "Dziecko posługuje")
+    .replace(/\bdzieckoposługuje\b/gi, "dziecko posługuje")
+    .replace(/\bposługuje sięwspomagającąlub\b/gi, "posługuje się wspomagającą lub")
+    .replace(/\bsięwspomagającą\b/gi, "się wspomagającą")
+    .replace(/\bwspomagającąlub\b/gi, "wspomagającą lub")
+    .replace(/\balternatywnąmetodąkomunikacji\b/gi, "alternatywną metodą komunikacji")
+    .replace(/\bmetodąkomunikacji\b/gi, "metodą komunikacji")
     .replace(/\s+/g, " ")
     .trim();
 }

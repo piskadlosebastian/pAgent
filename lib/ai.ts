@@ -666,7 +666,10 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
 }
 
 function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], previousAnswers: string[] = []) {
-  const cleaned = stripMarkdownDecorations(ensureReadableFieldLayout(repairGluedPolishTextPreservingLayout((answer ?? "")
+  const normalizedAnswer = (answer ?? "")
+    .replace(/\\r\\n|\\n|\\r/g, "\n")
+    .replace(/\\t/g, " ");
+  const cleaned = removeIncompleteTrailingSentence(stripMarkdownDecorations(ensureReadableFieldLayout(repairGluedPolishTextPreservingLayout(normalizedAnswer
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -678,7 +681,7 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], pre
     .replace(/Treść wymaga uzupełnienia[^.\n]*(\.|\n)?/gi, "")
     .replace(/^Plik\s+[^:\n]+:\s*/gim, "")
     .replace(/\n{3,}/g, "\n\n")
-    .trim())));
+    .trim()))));
 
   if (hasCopiedSourceFragment(cleaned, sourceTexts) || repeatsPreviousAnswer(cleaned, previousAnswers)) {
     return "Brak danych w załączonych materiałach.";
@@ -689,14 +692,32 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], pre
 
 function stripMarkdownDecorations(answer: string) {
   return answer
+    .replace(/^\s*\\?n\s*[*-]\s*/gim, "")
     .replace(/\*\*([^*\n]{2,80})\*\*\s*[-–—:]\s*/g, "")
     .replace(/\*\*([^*\n]{2,80})\*\*/g, "$1")
     .replace(/__([^_\n]{2,80})__\s*[-–—:]\s*/g, "")
     .replace(/__([^_\n]{2,80})__/g, "$1")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s*[-*]\s+\*\*([^*\n]{2,80})\*\*\s*[-–—:]\s*/gm, "- ")
+    .replace(/^\s*\*\s+/gm, "- ")
+    .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+}
+
+function removeIncompleteTrailingSentence(answer: string) {
+  const trimmed = answer.trim();
+  if (!trimmed || /[.!?;:)”"]$/.test(trimmed)) return trimmed;
+
+  const lastBreak = Math.max(trimmed.lastIndexOf("\n\n"), trimmed.lastIndexOf("\n"));
+  const prefix = lastBreak >= 0 ? trimmed.slice(0, lastBreak + (trimmed.slice(lastBreak, lastBreak + 2) === "\n\n" ? 2 : 1)) : "";
+  const tail = lastBreak >= 0 ? trimmed.slice(lastBreak).trim() : trimmed;
+  const punctuationIndex = Math.max(tail.lastIndexOf("."), tail.lastIndexOf("!"), tail.lastIndexOf("?"), tail.lastIndexOf(";"));
+  if (punctuationIndex > 60) {
+    return `${prefix}${tail.slice(0, punctuationIndex + 1)}`.trim();
+  }
+  if (prefix.trim()) return prefix.trim();
+  return trimmed.length > 180 ? `${trimmed}.` : trimmed;
 }
 
 function ensureReadableFieldLayout(answer: string) {
