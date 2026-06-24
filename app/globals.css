@@ -730,6 +730,103 @@ h2 {
   padding-left: 20px;
 }
 
+.file-dropzone {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 28px;
+  border: 1px dashed rgba(124, 111, 175, 0.42);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(243, 214, 228, 0.24) 0%, #FFFFFF 100%);
+  text-align: center;
+  box-shadow: 0 16px 36px rgba(46, 49, 66, 0.06);
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, background-color 180ms ease;
+}
+
+.file-dropzone:hover,
+.file-dropzone.uploading {
+  border-color: rgba(124, 111, 175, 0.68);
+  box-shadow: 0 22px 48px rgba(46, 49, 66, 0.09);
+  transform: translateY(-1px);
+}
+
+.file-dropzone input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.file-dropzone-icon,
+.uploaded-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  color: var(--primary);
+  background: rgba(243, 214, 228, 0.48);
+}
+
+.file-dropzone-icon {
+  width: 58px;
+  height: 58px;
+}
+
+.file-dropzone-title {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.file-dropzone-copy {
+  max-width: 560px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.upload-status {
+  margin: -4px 0 0;
+}
+
+.uploaded-file-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.uploaded-file-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(236, 232, 242, 0.95);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #FCFBFD 100%);
+  box-shadow: 0 10px 24px rgba(46, 49, 66, 0.04);
+}
+
+.uploaded-file-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.uploaded-file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

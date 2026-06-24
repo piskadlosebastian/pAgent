@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { Download, LoaderCircle, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Download, FileUp, LoaderCircle, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 
 type WizardStep = "child" | "files" | "preview";
 
@@ -72,6 +72,7 @@ export default function NewOpinionPage() {
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadingLabel, setUploadingLabel] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
   const [generationPending, setGenerationPending] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(initialGenerationProgress);
@@ -162,32 +163,44 @@ export default function NewOpinionPage() {
   }
 
   async function uploadSelectedFile(event: ChangeEvent<HTMLInputElement>) {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile || !createdDocument) return;
+    const selectedFiles = Array.from(event.target.files ?? []);
+    if (!selectedFiles.length || !createdDocument) return;
 
-    setMessage("");
+    const filesToUpload = selectedFiles.slice(0, 3);
+    setMessage(selectedFiles.length > 3 ? "Dodaję pierwsze 3 wybrane pliki. Kolejne możesz dodać następnym wyborem." : "");
     setUploading(true);
-    const formData = new FormData();
-    formData.set("documentId", createdDocument.id);
-    formData.set("file", selectedFile);
-    const response = await fetch("/api/uploads", { method: "POST", body: formData });
-    setUploading(false);
-    setFileInputKey((value) => value + 1);
+    setUploadingLabel("");
 
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      setMessage(data.error ?? "Nie udało się dodać pliku.");
-      return;
+    const uploadedFiles: UploadedItem[] = [];
+    for (const [index, selectedFile] of filesToUpload.entries()) {
+      setUploadingLabel(`Dodaję plik ${index + 1} z ${filesToUpload.length}: ${selectedFile.name}`);
+      const formData = new FormData();
+      formData.set("documentId", createdDocument.id);
+      formData.set("file", selectedFile);
+      const response = await fetch("/api/uploads", { method: "POST", body: formData });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setMessage(data.error ?? `Nie udało się dodać pliku: ${selectedFile.name}`);
+        break;
+      }
+
+      const uploaded = await response.json() as UploadedItem;
+      uploadedFiles.push({ id: uploaded.id, originalName: uploaded.originalName });
     }
 
-    const uploaded = await response.json() as UploadedItem;
-    setCreatedDocument({
-      ...createdDocument,
-      files: [...(createdDocument.files ?? []), { id: uploaded.id, originalName: uploaded.originalName }]
-    });
-    setMessage("Plik został dodany automatycznie.");
-  }
+    if (uploadedFiles.length) {
+      setCreatedDocument((current) => current
+        ? { ...current, files: [...(current.files ?? []), ...uploadedFiles] }
+        : current
+      );
+      setMessage(uploadedFiles.length === 1 ? "Plik został dodany automatycznie." : `Dodano ${uploadedFiles.length} pliki automatycznie.`);
+    }
 
+    setUploading(false);
+    setUploadingLabel("");
+    setFileInputKey((value) => value + 1);
+  }
   async function removeFile(fileId: string) {
     if (!createdDocument) return;
     setMessage("");
@@ -349,23 +362,27 @@ export default function NewOpinionPage() {
                 Wróć
               </button>
             </div>
-            <div className="field">
-              <label>Dodaj plik</label>
+            <label className={`file-dropzone ${uploading ? "uploading" : ""}`}>
               <input
                 key={fileInputKey}
-                className="input"
                 type="file"
+                multiple
                 accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={uploadSelectedFile}
                 disabled={uploading || pending}
               />
-            </div>
-            {uploading ? <p className="muted">Dodaję plik...</p> : null}
+              <span className="file-dropzone-icon"><FileUp size={26} aria-hidden /></span>
+              <span className="file-dropzone-title">Dodaj dokumenty źródłowe</span>
+              <span className="file-dropzone-copy">Wybierz jednocześnie do 3 plików z komputera. Obsługiwane formaty: PDF, DOC, DOCX, TXT, PNG, JPG.</span>
+              <span className="button secondary" aria-hidden>{uploading ? "Dodawanie..." : "Wybierz pliki"}</span>
+            </label>
+            {uploading ? <p className="muted upload-status">{uploadingLabel || "Dodaję pliki..."}</p> : null}
             {createdDocument.files?.length ? (
-              <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "grid", gap: "8px" }}>
+              <ul className="uploaded-file-list">
                 {createdDocument.files.map((item) => (
-                  <li key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-                    <span>{item.originalName}</span>
+                  <li className="uploaded-file-card" key={item.id}>
+                    <span className="uploaded-file-icon"><FileUp size={16} aria-hidden /></span>
+                    <span className="uploaded-file-name">{item.originalName}</span>
                     <button className="icon-button" type="button" onClick={() => removeFile(item.id)} disabled={pending || uploading} aria-label={`Usuń ${item.originalName}`}>
                       <Trash2 size={16} aria-hidden />
                     </button>
