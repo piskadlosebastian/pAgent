@@ -2,7 +2,8 @@ import AdmZip from "adm-zip";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { DocumentTemplate } from "../generated/prisma/client";
-import { asTemplateSections, extractDocxTemplateSections, isTextMarker, repairGluedPolishTextPreservingLayout, type TemplateSection } from "./document-knowledge";
+import { asTemplateSections, extractDocxTemplateSections, fileHasExtension, isTextMarker, repairGluedPolishTextPreservingLayout, type TemplateSection } from "./document-knowledge";
+import { convertDocToDocx } from "./office-convert";
 
 type GeneratedDocxInput = {
   documentId: string;
@@ -16,13 +17,16 @@ type DocxBuildResult = {
 };
 
 export async function buildDocxFromTemplate(input: GeneratedDocxInput) {
-  if (!isDocxTemplate(input.template)) return null;
+  const outputDirectory = path.join(process.cwd(), "storage", "generated");
+  await mkdir(outputDirectory, { recursive: true });
+  const docxTemplatePath = await resolveDocxTemplatePath(input.template, outputDirectory);
+  if (!docxTemplatePath) return null;
 
   let sections = asTemplateSections(input.template.sections);
   if (!sections.some((section) => section.marker === "TEKST")) {
-    sections = extractDocxTemplateSections(input.template.storagePath);
+    sections = extractDocxTemplateSections(docxTemplatePath);
   }
-  const zip = new AdmZip(input.template.storagePath);
+  const zip = new AdmZip(docxTemplatePath);
   const documentEntry = zip.getEntry("word/document.xml");
   if (!documentEntry) return null;
 
@@ -31,18 +35,25 @@ export async function buildDocxFromTemplate(input: GeneratedDocxInput) {
   zip.updateFile("word/document.xml", Buffer.from(filledXml, "utf8"));
   const validationErrors = validateGeneratedDocxXml(originalXml, filledXml);
 
-  const outputDirectory = path.join(process.cwd(), "storage", "generated");
-  await mkdir(outputDirectory, { recursive: true });
   const outputPath = path.join(outputDirectory, `${input.documentId}.docx`);
   await writeFile(outputPath, zip.toBuffer());
   return { path: outputPath, validationErrors } satisfies DocxBuildResult;
 }
 
-function isDocxTemplate(template: Pick<DocumentTemplate, "mimeType" | "originalName">) {
-  return (
+async function resolveDocxTemplatePath(template: Pick<DocumentTemplate, "storagePath" | "mimeType" | "originalName">, outputDirectory: string) {
+  if (
     template.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
     template.originalName.toLowerCase().endsWith(".docx")
-  );
+  ) {
+    return template.storagePath;
+  }
+
+  if (template.mimeType === "application/msword" || fileHasExtension(template.originalName, [".doc"])) {
+    const converted = await convertDocToDocx(template.storagePath, outputDirectory);
+    return converted.path;
+  }
+
+  return null;
 }
 
 function fillDocumentXml(xml: string, sections: TemplateSection[], aiSections: Record<string, string>) {
