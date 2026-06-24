@@ -730,6 +730,51 @@ h2 {
   padding-left: 20px;
 }
 
+.document-type-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.document-type-option {
+  display: grid;
+  gap: 6px;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid rgba(236, 232, 242, 0.95);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #FCFBFD 100%);
+  color: var(--muted);
+  text-align: left;
+  box-shadow: 0 10px 24px rgba(46, 49, 66, 0.04);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, background-color 180ms ease;
+}
+
+.document-type-option:hover,
+.document-type-option.active {
+  border-color: rgba(124, 111, 175, 0.42);
+  box-shadow: 0 18px 36px rgba(46, 49, 66, 0.08);
+  transform: translateY(-1px);
+}
+
+.document-type-option.active {
+  background: linear-gradient(180deg, rgba(243, 214, 228, 0.28) 0%, #FFFFFF 100%);
+  color: var(--primary);
+}
+
+.document-type-option span {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.document-type-option small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
 .file-dropzone {
   position: relative;
   display: grid;
@@ -1225,6 +1270,10 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .document-type-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .stepper {
     grid-template-columns: 1fr;
   }
@@ -1280,6 +1329,7 @@ h2 {
   }
 
   .documents-toolbar,
+  .document-type-picker,
   .document-row-card {
     grid-template-columns: 1fr;
   }

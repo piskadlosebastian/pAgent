@@ -17,6 +17,8 @@ type UploadedItem = {
   originalName: string;
 };
 
+type DocumentKind = "KS" | "WWR" | "OPINIA_PPP" | "INNE";
+
 type CreatedDocument = {
   id: string;
   title: string;
@@ -53,10 +55,18 @@ const initialGenerationProgress: GenerationProgress = {
   percent: 0
 };
 
+const documentTypes: { value: DocumentKind; label: string; description: string; titlePrefix: string }[] = [
+  { value: "WWR", label: "WWR", description: "Opinia o potrzebie wczesnego wspomagania rozwoju", titlePrefix: "Opinia WWR" },
+  { value: "KS", label: "KS", description: "Dokument dla kształcenia specjalnego", titlePrefix: "KS" },
+  { value: "OPINIA_PPP", label: "Opinia PPP", description: "Inna opinia poradni psychologiczno-pedagogicznej", titlePrefix: "Opinia PPP" },
+  { value: "INNE", label: "Inne", description: "Pozostały dokument zgodny z aktywnym wzorem", titlePrefix: "Dokument" }
+];
+
 export default function NewOpinionPage() {
   const [children, setChildren] = useState<ChildItem[]>([]);
   const [childMode, setChildMode] = useState<"existing" | "new">("existing");
   const [childId, setChildId] = useState("");
+  const [documentType, setDocumentType] = useState<DocumentKind>("WWR");
   const [newChild, setNewChild] = useState({
     firstName: "",
     lastName: "",
@@ -100,6 +110,7 @@ export default function NewOpinionPage() {
     ? Boolean(newChild.firstName.trim() && newChild.lastName.trim() && newChild.birthDate)
     : Boolean(childId);
   const currentStepIndex = step === "child" ? 0 : step === "files" ? 1 : 2;
+  const selectedDocumentType = documentTypes.find((item) => item.value === documentType) ?? documentTypes[0];
 
   async function saveDraft() {
     setMessage("");
@@ -139,9 +150,9 @@ export default function NewOpinionPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         childId: activeChildId,
-        title: `Opinia WWR - ${activeChildName || "dziecko"}`,
-        type: "WWR",
-        pppType: "WWR",
+        title: `${selectedDocumentType.titlePrefix} - ${activeChildName || "dziecko"}`,
+        type: selectedDocumentType.label,
+        pppType: selectedDocumentType.value,
         status: "DRAFT",
         specialistNotes: null,
         generatedContent: "",
@@ -291,6 +302,25 @@ export default function NewOpinionPage() {
 
         {step === "child" ? (
           <>
+            <div className="field">
+              <label>Typ dokumentu</label>
+              <div className="document-type-picker" role="radiogroup" aria-label="Typ dokumentu">
+                {documentTypes.map((type) => (
+                  <button
+                    className={`document-type-option ${documentType === type.value ? "active" : ""}`}
+                    key={type.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={documentType === type.value}
+                    onClick={() => setDocumentType(type.value)}
+                  >
+                    <span>{type.label}</span>
+                    <small>{type.description}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="field">
               <label>Dziecko</label>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
