@@ -105,6 +105,26 @@ export default function SettingsPage() {
     await loadManagedUsers();
   }
 
+  function generateSecurePassword() {
+    const lower = "abcdefghijkmnopqrstuvwxyz";
+    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const digits = "23456789";
+    const symbols = "!@#$%?+-_";
+    const all = `${lower}${upper}${digits}${symbols}`;
+    const required = [
+      randomCharacter(lower),
+      randomCharacter(upper),
+      randomCharacter(digits),
+      randomCharacter(symbols)
+    ];
+    const password = shuffleCharacters([
+      ...required,
+      ...Array.from({ length: 14 }, () => randomCharacter(all))
+    ]).join("");
+    setUserForm((current) => ({ ...current, password }));
+    setUsersMessage("Wygenerowano bezpieczne hasło. Zapisz je przed utworzeniem lub aktualizacją konta.");
+  }
+
   function editUser(user: ManagedUser) {
     setEditingUserId(user.id);
     setUsersMessage("");
@@ -252,14 +272,20 @@ export default function SettingsPage() {
               </div>
               <div className="field">
                 <label>{editingUserId ? "Nowe hasło (opcjonalnie)" : "Hasło"}</label>
-                <input
-                  className="input"
-                  type="password"
-                  value={userForm.password}
-                  onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
-                  required={!editingUserId}
-                  minLength={editingUserId ? undefined : 10}
-                />
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <input
+                    className="input"
+                    type="text"
+                    value={userForm.password}
+                    onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
+                    required={!editingUserId}
+                    minLength={editingUserId ? undefined : 10}
+                    autoComplete="new-password"
+                  />
+                  <button className="button secondary" type="button" onClick={generateSecurePassword} style={{ whiteSpace: "nowrap" }}>
+                    Generuj
+                  </button>
+                </div>
               </div>
               <div className="toolbar">
                 <button className="button accent" type="submit">
@@ -314,4 +340,21 @@ export default function SettingsPage() {
       ) : null}
     </div>
   );
+}
+
+function randomCharacter(characters: string) {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return characters[values[0] % characters.length];
+}
+
+function shuffleCharacters(characters: string[]) {
+  const output = [...characters];
+  for (let index = output.length - 1; index > 0; index -= 1) {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    const swapIndex = values[0] % (index + 1);
+    [output[index], output[swapIndex]] = [output[swapIndex], output[index]];
+  }
+  return output;
 }
