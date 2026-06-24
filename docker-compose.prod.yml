@@ -32,6 +32,7 @@ services:
       - pagent-uploads:/app/storage/uploads
       - pagent-templates:/app/storage/templates
       - pagent-examples:/app/storage/examples
+      - pagent-generated:/app/storage/generated
     command: sh -c "npx prisma migrate deploy && npm run start"
 
 volumes:
@@ -39,3 +40,4 @@ volumes:
   pagent-uploads:
   pagent-templates:
   pagent-examples:
+  pagent-generated:

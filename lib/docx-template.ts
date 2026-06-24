@@ -84,16 +84,19 @@ function replaceParagraphText(paragraph: string, replacement: string, preferList
 }
 
 function replaceParagraphWithSingleBlock(paragraph: string, replacement: string) {
-  let replacedFirstText = false;
-  return paragraph.replace(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g, (_match, attrs: string) => {
-    if (replacedFirstText) return `<w:t${attrs}></w:t>`;
-    replacedFirstText = true;
-    return `<w:t${ensurePreserveSpace(attrs)}>${escapeXml(replacement)}</w:t>`;
-  });
-}
+  const paragraphOpen = paragraph.match(/^<w:p\b([^>]*)>/)?.[1] ?? "";
+  const paragraphProperties = paragraph.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] ?? "";
+  const runProperties = paragraph.match(/<w:r\b[^>]*>[\s\S]*?(<w:rPr\b[\s\S]*?<\/w:rPr>)/)?.[1] ?? "";
 
-function ensurePreserveSpace(attrs: string) {
-  return /\bxml:space=/.test(attrs) ? attrs : `${attrs} xml:space="preserve"`;
+  return [
+    `<w:p${paragraphOpen}>`,
+    paragraphProperties,
+    "<w:r>",
+    runProperties,
+    `<w:t xml:space="preserve">${escapeXml(replacement)}</w:t>`,
+    "</w:r>",
+    "</w:p>"
+  ].join("");
 }
 
 function splitReplacementBlocks(replacement: string, preferList: boolean) {

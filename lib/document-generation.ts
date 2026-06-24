@@ -122,6 +122,7 @@ export async function generateDocumentForUser(input: {
     }),
     generatedDocxPath,
     docxValidationErrors,
+    aiSections: generated.aiSections ?? null,
     aiAgent: {
       id: selectedAgent.id,
       name: selectedAgent.name,
