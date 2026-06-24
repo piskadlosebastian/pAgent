@@ -8,6 +8,12 @@ const PROFILE_AGENT_TIMEOUT_MS = 45_000;
 const FIELD_AGENT_TIMEOUT_MS = 35_000;
 const ENABLE_FIELD_EXPANSION = process.env.ENABLE_FIELD_EXPANSION === "true";
 
+export type GenerationProgressEvent =
+  | { phase: "profile-start" }
+  | { phase: "profile-complete" }
+  | { phase: "field-start"; current: number; total: number; title: string }
+  | { phase: "field-complete"; current: number; total: number; title: string };
+
 export function anonymizeData(text: string, child: Child): string {
   let anonymized = text;
   if (child.firstName) anonymized = anonymized.replaceAll(child.firstName, "[DZIECKO_1]");
@@ -33,6 +39,7 @@ export async function generateOpinionDraft(input: {
   template?: DocumentTemplate | null;
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   agentId?: string | null;
+  onProgress?: (event: GenerationProgressEvent) => void;
 }): Promise<{ content: string; validationReport?: ValidationReport; aiSections?: Record<string, string> }> {
   if (!input.template) {
     return { content: generateNoTemplateDraft(input) };
@@ -49,7 +56,9 @@ export async function generateOpinionDraft(input: {
   const unavailableAgentIds = new Set<string>();
 
   if (agent.provider === "pollinations" || agent.provider === "gemini" || agent.provider === "openrouter") {
+    input.onProgress?.({ phase: "profile-start" });
     childProfile = await generateChildProfileWithOnlineAgent(input, agent, unavailableAgentIds);
+    input.onProgress?.({ phase: "profile-complete" });
     aiSections = await generateFieldsWithOnlineAgent({ ...input, childProfile }, sections, agent, unavailableAgentIds);
   }
 
@@ -110,6 +119,8 @@ async function generateFieldsWithOnlineAgent(
   const agents = getOnlineFallbackAgents(selectedAgent);
   const output: Record<string, string> = {};
   const generatedKeys = new Set<string>();
+  const totalFields = countUniqueGenerationFields(sections);
+  let completedFields = 0;
 
   for (const section of sections) {
     const key = sectionGenerationKey(section);
@@ -121,6 +132,12 @@ async function generateFieldsWithOnlineAgent(
     if (key) generatedKeys.add(key);
 
     let generated = "";
+    input.onProgress?.({
+      phase: "field-start",
+      current: completedFields + 1,
+      total: totalFields,
+      title: section.instruction ?? section.title
+    });
 
     for (const agent of agents) {
       if (unavailableAgentIds.has(agent.id)) continue;
@@ -165,6 +182,13 @@ async function generateFieldsWithOnlineAgent(
     const content = generated || "Brak danych w załączonych materiałach.";
     output[section.title] = content;
     if (section.fieldId) output[section.fieldId] = content;
+    completedFields += 1;
+    input.onProgress?.({
+      phase: "field-complete",
+      current: completedFields,
+      total: totalFields,
+      title: section.instruction ?? section.title
+    });
   }
 
   return output;
@@ -235,10 +259,27 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
   const apiKey = process.env.DIFY_API_KEY;
   if (!apiUrl || !apiKey) return undefined;
   const output: Record<string, string> = {};
+  const generatedKeys = new Set<string>();
+  const totalFields = countUniqueGenerationFields(sections);
+  let completedFields = 0;
 
   for (const section of sections) {
+    const key = sectionGenerationKey(section);
+    if (key && generatedKeys.has(key)) {
+      output[section.title] = "";
+      if (section.fieldId) output[section.fieldId] = "";
+      continue;
+    }
+    if (key) generatedKeys.add(key);
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FIELD_AGENT_TIMEOUT_MS);
+    input.onProgress?.({
+      phase: "field-start",
+      current: completedFields + 1,
+      total: totalFields,
+      title: section.instruction ?? section.title
+    });
 
     try {
       const response = await fetch(`${apiUrl.replace(/\/$/, "")}/chat-messages`, {
@@ -274,6 +315,13 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
     } finally {
       clearTimeout(timeout);
     }
+    completedFields += 1;
+    input.onProgress?.({
+      phase: "field-complete",
+      current: completedFields,
+      total: totalFields,
+      title: section.instruction ?? section.title
+    });
   }
 
   return output;
@@ -289,6 +337,7 @@ type GenerationInput = {
   similarExamples?: Pick<KnowledgeExample, "title" | "extractedText">[];
   agentId?: string | null;
   childProfile?: string;
+  onProgress?: (event: GenerationProgressEvent) => void;
 };
 
 function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
@@ -330,6 +379,18 @@ function sectionGenerationKey(section: TemplateSection) {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function countUniqueGenerationFields(sections: TemplateSection[]) {
+  const keys = new Set<string>();
+  let count = 0;
+  for (const section of sections) {
+    const key = sectionGenerationKey(section) || section.title;
+    if (key && keys.has(key)) continue;
+    if (key) keys.add(key);
+    count += 1;
+  }
+  return Math.max(count, 1);
 }
 
 function isConfigurationOrQuotaError(error: unknown) {

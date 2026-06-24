@@ -88,8 +88,12 @@ function replaceParagraphWithSingleBlock(paragraph: string, replacement: string)
   return paragraph.replace(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g, (_match, attrs: string) => {
     if (replacedFirstText) return `<w:t${attrs}></w:t>`;
     replacedFirstText = true;
-    return `<w:t${attrs}>${escapeXml(replacement)}</w:t>`;
+    return `<w:t${ensurePreserveSpace(attrs)}>${escapeXml(replacement)}</w:t>`;
   });
+}
+
+function ensurePreserveSpace(attrs: string) {
+  return /\bxml:space=/.test(attrs) ? attrs : `${attrs} xml:space="preserve"`;
 }
 
 function splitReplacementBlocks(replacement: string, preferList: boolean) {

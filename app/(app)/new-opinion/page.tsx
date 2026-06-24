@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Download, LoaderCircle, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Download, LoaderCircle, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 
 type WizardStep = "child" | "files" | "preview";
 
@@ -32,14 +32,26 @@ type CreatedDocument = {
   files?: UploadedItem[];
 };
 
-const generationSteps = [
-  "Krok 1/6 - Odczytywanie dokumentów",
-  "Krok 2/6 - Tworzenie profilu dziecka",
-  "Krok 3/6 - Analiza wzoru",
-  "Krok 4/6 - Generowanie treści",
-  "Krok 5/6 - Składanie dokumentu",
-  "Krok 6/6 - Kontrola jakości"
-];
+
+type GenerationProgress = {
+  step: string;
+  message: string;
+  percent: number;
+};
+
+type GenerationJobResponse = {
+  jobId?: string;
+  status: "queued" | "running" | "completed" | "failed";
+  progress?: GenerationProgress;
+  result?: CreatedDocument;
+  error?: string;
+};
+
+const initialGenerationProgress: GenerationProgress = {
+  step: "Kolejka",
+  message: "Przygotowuję generowanie dokumentu.",
+  percent: 0
+};
 
 export default function NewOpinionPage() {
   const [children, setChildren] = useState<ChildItem[]>([]);
@@ -62,7 +74,7 @@ export default function NewOpinionPage() {
   const [uploading, setUploading] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [generationPending, setGenerationPending] = useState(false);
-  const [generationStep, setGenerationStep] = useState(0);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(initialGenerationProgress);
 
   useEffect(() => {
     fetch("/api/children")
@@ -73,17 +85,6 @@ export default function NewOpinionPage() {
         if (!data.length) setChildMode("new");
       });
   }, []);
-
-  useEffect(() => {
-    if (!generationPending) {
-      setGenerationStep(0);
-      return;
-    }
-    const interval = window.setInterval(() => {
-      setGenerationStep((current) => Math.min(current + 1, generationSteps.length - 1));
-    }, 12000);
-    return () => window.clearInterval(interval);
-  }, [generationPending]);
 
   const selectedChild = useMemo(
     () => children.find((child) => child.id === childId),
@@ -98,7 +99,6 @@ export default function NewOpinionPage() {
     ? Boolean(newChild.firstName.trim() && newChild.lastName.trim() && newChild.birthDate)
     : Boolean(childId);
   const currentStepIndex = step === "child" ? 0 : step === "files" ? 1 : 2;
-  const generationPercent = Math.round(((generationStep + 1) / generationSteps.length) * 100);
 
   async function saveDraft() {
     setMessage("");
@@ -213,23 +213,41 @@ export default function NewOpinionPage() {
 
     setPending(true);
     setGenerationPending(true);
-    setGenerationStep(0);
+    setGenerationProgress(initialGenerationProgress);
     setMessage("Generuję projekt na podstawie aktywnego wzoru i załączonych dokumentów źródłowych...");
-    const response = await fetch(`/api/documents/${createdDocument.id}/generate`, { method: "POST" });
-    setPending(false);
-    setGenerationPending(false);
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      setMessage(data.error ?? "Nie udało się wygenerować dokumentu.");
-      return;
+    try {
+      const response = await fetch(`/api/documents/${createdDocument.id}/generate/start`, { method: "POST" });
+      const started = await response.json().catch(() => ({})) as GenerationJobResponse;
+      if (!response.ok || !started.jobId) {
+        throw new Error(started.error ?? "Nie udało się uruchomić generowania dokumentu.");
+      }
+      if (started.progress) setGenerationProgress(started.progress);
+      const document = await waitForGenerationJob(started.jobId);
+      setCreatedDocument(document);
+      setGeneratedContent(document.generatedContent ?? "");
+      setStep("preview");
+      setMessage("Dokument został wygenerowany i jest gotowy do weryfikacji.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nie udało się wygenerować dokumentu.");
+    } finally {
+      setPending(false);
+      setGenerationPending(false);
     }
-    const document = await response.json();
-    setCreatedDocument(document);
-    setGeneratedContent(document.generatedContent ?? "");
-    setStep("preview");
-    setMessage("Dokument został wygenerowany i jest gotowy do weryfikacji.");
   }
 
+  async function waitForGenerationJob(jobId: string) {
+    while (true) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      const response = await fetch(`/api/generation-jobs/${jobId}`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({})) as GenerationJobResponse;
+      if (!response.ok) {
+        throw new Error(data.error ?? "Nie udało się pobrać postępu generowania.");
+      }
+      if (data.progress) setGenerationProgress(data.progress);
+      if (data.status === "completed" && data.result) return data.result;
+      if (data.status === "failed") throw new Error(data.error ?? "Nie udało się wygenerować dokumentu.");
+    }
+  }
   function updateNewChild(field: keyof typeof newChild, value: string) {
     setNewChild((current) => ({ ...current, [field]: value }));
   }
@@ -237,7 +255,7 @@ export default function NewOpinionPage() {
   return (
     <div className="grid">
       {generationPending ? (
-        <GenerationOverlay generationStep={generationStep} generationPercent={generationPercent} />
+        <GenerationOverlay progress={generationProgress} />
       ) : null}
 
       <section className="panel">
@@ -403,7 +421,8 @@ export default function NewOpinionPage() {
   );
 }
 
-function GenerationOverlay({ generationStep, generationPercent }: { generationStep: number; generationPercent: number }) {
+function GenerationOverlay({ progress }: { progress: GenerationProgress }) {
+  const percent = Math.max(0, Math.min(100, Math.round(progress.percent)));
   return (
     <div className="generation-overlay" role="status" aria-live="polite">
       <div className="generation-card">
@@ -411,21 +430,13 @@ function GenerationOverlay({ generationStep, generationPercent }: { generationSt
           <LoaderCircle size={34} aria-hidden />
         </div>
         <div>
-          <h2>pAgent przygotowuje dokument</h2>
-          <p>Analizujemy załączone materiały, łączymy informacje i uzupełniamy wzór opinii.</p>
+          <h2>{progress.step || "pAgent przygotowuje dokument"}</h2>
+          <p>{progress.message || "Pracuję nad dokumentem na podstawie wzoru i załączonych materiałów."}</p>
         </div>
         <div className="generation-progress" aria-hidden>
-          <span style={{ width: `${Math.max(12, generationPercent)}%` }} />
+          <span style={{ width: `${Math.max(8, percent)}%` }} />
         </div>
-        <p className="muted" style={{ fontSize: "12px", margin: 0 }}>{generationPercent}% wykonania</p>
-        <ol className="generation-steps">
-          {generationSteps.map((step, index) => (
-            <li className={index < generationStep ? "done" : index === generationStep ? "active" : ""} key={step}>
-              {index < generationStep ? <CheckCircle2 size={18} aria-hidden /> : <span>{index + 1}</span>}
-              {step}
-            </li>
-          ))}
-        </ol>
+        <p className="muted" style={{ fontSize: "12px", margin: 0 }}>{percent}% wykonania</p>
       </div>
     </div>
   );
