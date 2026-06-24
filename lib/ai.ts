@@ -690,7 +690,7 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], pre
   const normalizedAnswer = (answer ?? "")
     .replace(/\\r\\n|\\n|\\r/g, "\n")
     .replace(/\\t/g, " ");
-  const cleaned = removeIncompleteTrailingSentence(stripMarkdownDecorations(ensureReadableFieldLayout(repairGluedPolishTextPreservingLayout(normalizedAnswer
+  const cleaned = removeTechnicalArtifacts(removeIncompleteTrailingSentence(stripMarkdownDecorations(ensureReadableFieldLayout(repairGluedPolishTextPreservingLayout(normalizedAnswer
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -702,7 +702,7 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], pre
     .replace(/Treść wymaga uzupełnienia[^.\n]*(\.|\n)?/gi, "")
     .replace(/^Plik\s+[^:\n]+:\s*/gim, "")
     .replace(/\n{3,}/g, "\n\n")
-    .trim()))));
+    .trim())))));
 
   if (hasCopiedSourceFragment(cleaned, sourceTexts) || repeatsPreviousAnswer(cleaned, previousAnswers)) {
     return "Brak danych w załączonych materiałach.";
@@ -723,6 +723,16 @@ function stripMarkdownDecorations(answer: string) {
     .replace(/^\s*\*\s+/gm, "- ")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function removeTechnicalArtifacts(answer: string) {
+  return answer
+    .split("\n")
+    .map((line) => line.replace(/\\+/g, "").trim())
+    .filter((line) => line && !/^[{}[\]"',:]+$/.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
