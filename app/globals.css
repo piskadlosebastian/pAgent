@@ -540,6 +540,32 @@ h2 {
   transform: none;
 }
 
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border: 1px solid rgba(236, 232, 242, 0.95);
+  border-radius: 12px;
+  background: var(--bg-soft);
+  color: var(--danger);
+  transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.icon-button:hover {
+  background: #FFFFFF;
+  border-color: rgba(224, 82, 99, 0.4);
+  transform: translateY(-1px);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 .table-card {
   overflow: hidden;
   padding: 0;

@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, FileUp, LoaderCircle, Sparkles } from "lucide-react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Download, FileUp, LoaderCircle, Sparkles, Trash2 } from "lucide-react";
+
+type WizardStep = "child" | "files" | "preview";
 
 type ChildItem = {
   id: string;
   firstName: string;
   lastName: string;
+  birthDate?: string;
+};
+
+type UploadedItem = {
+  id: string;
+  originalName: string;
 };
 
 type CreatedDocument = {
@@ -14,21 +22,31 @@ type CreatedDocument = {
   title: string;
   generatedContent?: string | null;
   validationStatus?: "NOT_VALIDATED" | "VALID" | "NEEDS_FIX";
-  files?: { id: string; originalName: string }[];
+  files?: UploadedItem[];
 };
+
+const NEW_CHILD_VALUE = "__new_child__";
 
 export default function NewOpinionPage() {
   const [children, setChildren] = useState<ChildItem[]>([]);
+  const [childMode, setChildMode] = useState<"existing" | "new">("existing");
   const [childId, setChildId] = useState("");
-  const [pppType, setPppType] = useState("OPINIA_PPP");
-  const [type, setType] = useState("Opinia PPP");
-  const [title, setTitle] = useState("");
-  const [specialistNotes, setSpecialistNotes] = useState("");
+  const [newChild, setNewChild] = useState({
+    firstName: "",
+    lastName: "",
+    birthDate: "",
+    school: "",
+    classGroup: "",
+    guardians: "",
+    notes: ""
+  });
   const [generatedContent, setGeneratedContent] = useState("");
   const [createdDocument, setCreatedDocument] = useState<CreatedDocument | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [step, setStep] = useState<WizardStep>("child");
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [generationPending, setGenerationPending] = useState(false);
   const [generationStep, setGenerationStep] = useState(0);
 
@@ -38,6 +56,7 @@ export default function NewOpinionPage() {
       .then((data) => {
         setChildren(data);
         if (data[0]) setChildId(data[0].id);
+        if (!data.length) setChildMode("new");
       });
   }, []);
 
@@ -47,58 +66,128 @@ export default function NewOpinionPage() {
       return;
     }
     const interval = window.setInterval(() => {
-      setGenerationStep((step) => Math.min(step + 1, generationSteps.length - 1));
+      setGenerationStep((current) => Math.min(current + 1, generationSteps.length - 1));
     }, 12000);
     return () => window.clearInterval(interval);
   }, [generationPending]);
 
+  const selectedChild = useMemo(
+    () => children.find((child) => child.id === childId),
+    [children, childId]
+  );
+  const childFullName = childMode === "new"
+    ? `${newChild.firstName} ${newChild.lastName}`.trim()
+    : selectedChild
+      ? `${selectedChild.firstName} ${selectedChild.lastName}`
+      : "";
+  const canSaveDraft = childMode === "new"
+    ? Boolean(newChild.firstName.trim() && newChild.lastName.trim() && newChild.birthDate)
+    : Boolean(childId);
+  const currentStepIndex = step === "child" ? 0 : step === "files" ? 1 : 2;
+  const generationPercent = Math.round(((generationStep + 1) / generationSteps.length) * 100);
+
   async function saveDraft() {
     setMessage("");
     setPending(true);
+
+    let activeChildId = childId;
+    let activeChildName = childFullName;
+
+    if (childMode === "new") {
+      const childResponse = await fetch("/api/children", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...newChild,
+          school: newChild.school || null,
+          classGroup: newChild.classGroup || null,
+          guardians: newChild.guardians || null,
+          notes: newChild.notes || null
+        })
+      });
+
+      if (!childResponse.ok) {
+        setPending(false);
+        setMessage("Nie udało się dodać dziecka. Sprawdź wymagane pola.");
+        return;
+      }
+
+      const child = await childResponse.json() as ChildItem;
+      setChildren((items) => [...items, child].sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`)));
+      setChildId(child.id);
+      activeChildId = child.id;
+      activeChildName = `${child.firstName} ${child.lastName}`;
+    }
+
     const response = await fetch("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        childId,
-        title: title || type,
-        type,
-        pppType,
+        childId: activeChildId,
+        title: `Opinia WWR - ${activeChildName || "dziecko"}`,
+        type: "WWR",
+        pppType: "WWR",
         status: "DRAFT",
-        specialistNotes,
-        generatedContent,
+        specialistNotes: null,
+        generatedContent: "",
         generateDraft: false
       })
     });
+
     setPending(false);
     if (!response.ok) {
-      setMessage("Nie udało się utworzyć dokumentu. Sprawdź, czy wybrano dziecko.");
+      setMessage("Nie udało się utworzyć dokumentu roboczego.");
       return;
     }
+
     const document = await response.json();
     setCreatedDocument(document);
-    setGeneratedContent(document.generatedContent ?? "");
-    setMessage("Dokument roboczy zapisany. Teraz dodaj wyniki badań i uruchom generowanie.");
+    setGeneratedContent("");
+    setStep("files");
+    setMessage("Dokument roboczy zapisany. Dodaj dokumenty źródłowe.");
   }
 
-  async function uploadFile() {
-    if (!file || !createdDocument) return;
-    setPending(true);
+  async function uploadSelectedFile(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile || !createdDocument) return;
+
+    setMessage("");
+    setUploading(true);
     const formData = new FormData();
     formData.set("documentId", createdDocument.id);
-    formData.set("file", file);
+    formData.set("file", selectedFile);
     const response = await fetch("/api/uploads", { method: "POST", body: formData });
-    setPending(false);
+    setUploading(false);
+    setFileInputKey((value) => value + 1);
+
     if (!response.ok) {
-      setMessage("Nie udało się dodać pliku.");
+      const data = await response.json().catch(() => ({}));
+      setMessage(data.error ?? "Nie udało się dodać pliku.");
       return;
     }
-    const uploaded = await response.json();
+
+    const uploaded = await response.json() as UploadedItem;
     setCreatedDocument({
       ...createdDocument,
       files: [...(createdDocument.files ?? []), { id: uploaded.id, originalName: uploaded.originalName }]
     });
-    setFile(null);
-    setMessage("Plik źródłowy został dodany. Możesz dodać kolejne wyniki badań albo uruchomić generowanie.");
+    setMessage("Plik został dodany automatycznie.");
+  }
+
+  async function removeFile(fileId: string) {
+    if (!createdDocument) return;
+    setMessage("");
+    setPending(true);
+    const response = await fetch(`/api/uploads/${fileId}`, { method: "DELETE" });
+    setPending(false);
+    if (!response.ok) {
+      setMessage("Nie udało się usunąć pliku.");
+      return;
+    }
+    setCreatedDocument({
+      ...createdDocument,
+      files: (createdDocument.files ?? []).filter((file) => file.id !== fileId)
+    });
   }
 
   async function generateFromSources() {
@@ -107,6 +196,7 @@ export default function NewOpinionPage() {
       setMessage("Dodaj co najmniej jeden plik źródłowy przed generowaniem dokumentu.");
       return;
     }
+
     setPending(true);
     setGenerationPending(true);
     setGenerationStep(0);
@@ -122,151 +212,196 @@ export default function NewOpinionPage() {
     const document = await response.json();
     setCreatedDocument(document);
     setGeneratedContent(document.generatedContent ?? "");
+    setStep("preview");
     setMessage("Dokument został wygenerowany i jest gotowy do weryfikacji.");
   }
 
-  const steps = ["Dane dziecka", "Typ i wzór", "Dokumenty źródłowe", "Generowanie", "Weryfikacja"];
-  const generationSteps = [
-    "Krok 1/6 - Odczytywanie dokumentów",
-    "Krok 2/6 - Tworzenie profilu dziecka",
-    "Krok 3/6 - Analiza wzoru",
-    "Krok 4/6 - Generowanie treści",
-    "Krok 5/6 - Składanie dokumentu",
-    "Krok 6/6 - Kontrola jakości"
-  ];
-  const generationPercent = Math.round(((generationStep + 1) / generationSteps.length) * 100);
-  const currentStep = generatedContent ? 4 : createdDocument?.files?.length ? 3 : createdDocument ? 2 : childId ? 1 : 0;
+  function updateNewChild(field: keyof typeof newChild, value: string) {
+    setNewChild((current) => ({ ...current, [field]: value }));
+  }
 
   return (
     <div className="grid">
       {generationPending ? (
-        <div className="generation-overlay" role="status" aria-live="polite">
-          <div className="generation-card">
-            <div className="generation-spinner">
-              <LoaderCircle size={34} aria-hidden />
-            </div>
-            <div>
-              <h2>pAgent przygotowuje dokument</h2>
-              <p>Analizujemy załączone materiały, łączymy informacje i uzupełniamy wzór opinii. To może potrwać chwilę.</p>
-            </div>
-            <div className="generation-progress" aria-hidden>
-              <span style={{ width: `${Math.max(12, generationPercent)}%` }} />
-            </div>
-            <p className="muted" style={{ fontSize: "12px", margin: 0 }}>{generationPercent}% wykonania</p>
-            <ol className="generation-steps">
-              {generationSteps.map((step, index) => (
-                <li className={index < generationStep ? "done" : index === generationStep ? "active" : ""} key={step}>
-                  {index < generationStep ? <CheckCircle2 size={18} aria-hidden /> : <span>{index + 1}</span>}
-                  {step}
-                </li>
-              ))}
-            </ol>
-            <p className="muted">Nie zamykaj okna i nie odświeżaj strony podczas generowania. Ostatni etap może nadal obejmować oczekiwanie na odpowiedzi AI.</p>
-          </div>
-        </div>
+        <GenerationOverlay generationStep={generationStep} generationPercent={generationPercent} />
       ) : null}
+
       <section className="panel">
         <div className="page-title">
           <h1>Nowa opinia</h1>
-          <p>Najpierw wybierz aktywny wzór i zapisz dokument roboczy, potem dodaj wyniki badań, a dopiero na końcu uruchom generowanie.</p>
+          <p>Utwórz dokument w trzech krokach: dziecko, pliki źródłowe, podgląd i pobranie opinii.</p>
         </div>
         <div className="stepper" aria-label="Kroki tworzenia opinii">
-          {steps.map((step, index) => (
-            <div className={`step ${index === currentStep ? "active" : ""}`} key={step}>
+          {["Dziecko", "Pliki", "Podgląd"].map((label, index) => (
+            <div className={`step ${index === currentStepIndex ? "active" : ""}`} key={label}>
               <span className="step-number">{index + 1}</span>
-              <span>{step}</span>
+              <span>{label}</span>
             </div>
           ))}
         </div>
       </section>
 
-      <div className="grid grid-2">
       <section className="panel form">
         {message ? <div className="alert">{message}</div> : null}
-        <div className="field">
-          <label>Dziecko</label>
-          <select className="select" value={childId} onChange={(event) => setChildId(event.target.value)} required>
-            {children.map((child) => (
-              <option key={child.id} value={child.id}>{child.firstName} {child.lastName}</option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <label>Typ dokumentu PPP</label>
-          <select
-            className="select"
-            value={pppType}
-            onChange={(event) => {
-              setPppType(event.target.value);
-              setType(event.target.options[event.target.selectedIndex].text);
-              if (!title) setTitle(event.target.options[event.target.selectedIndex].text);
-            }}
-          >
-            <option value="KS">KS</option>
-            <option value="WWR">WWR</option>
-            <option value="OPINIA_PPP">Opinia PPP</option>
-            <option value="INNE">Inne</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Tytuł</label>
-          <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Np. Opinia PPP - Jan Kowalski" />
-        </div>
-        <div className="field">
-          <label>Dodatkowe uwagi specjalisty</label>
-          <textarea className="textarea" value={specialistNotes} onChange={(event) => setSpecialistNotes(event.target.value)} />
-        </div>
-        <button className="button accent" type="button" onClick={saveDraft} disabled={!childId || pending || Boolean(createdDocument)}>
-          Zapisz dokument roboczy
-        </button>
-        <p className="muted" style={{ fontSize: "12px" }}>
-          Generator zostanie uruchomiony dopiero po dodaniu dokumentów źródłowych. Aktywny wzór dla wybranego typu pozostaje nadrzędny wobec AI.
-        </p>
-      </section>
 
-      <section className="panel form">
-        <div className="toolbar">
-          <h2>Podgląd treści</h2>
-          {createdDocument ? (
-            <a className="button secondary" href={`/api/documents/${createdDocument.id}/export`}>
-              Pobierz DOCX
-            </a>
-          ) : null}
-        </div>
-        <textarea
-          className="textarea document-preview"
-          value={generatedContent}
-          onChange={(event) => setGeneratedContent(event.target.value)}
-          placeholder="Po wygenerowaniu na podstawie wzoru i załączników tutaj pojawi się projekt dokumentu do weryfikacji."
-        />
-        {createdDocument?.validationStatus ? (
-          <div className="alert">
-            Status zgodności ze wzorem: {createdDocument.validationStatus === "VALID" ? "zgodny" : createdDocument.validationStatus === "NEEDS_FIX" ? "wymaga poprawy" : "niezwalidowany"}
-          </div>
-        ) : null}
-        <div className="field" style={{ marginTop: "16px" }}>
-          <label>Załącz wyniki badań i inne dokumenty źródłowe</label>
-          <div style={{ display: "flex", gap: "12px" }}>
-            <input className="input" type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setFile(event.target.files?.[0] ?? null)} style={{ flex: 1 }} />
-            <button className="button secondary" type="button" onClick={uploadFile} disabled={!createdDocument || !file || pending}>
-              <FileUp size={18} aria-hidden />
-              Dodaj plik
+        {step === "child" ? (
+          <>
+            <div className="field">
+              <label>Dziecko</label>
+              <select
+                className="select"
+                value={childMode === "new" ? NEW_CHILD_VALUE : childId}
+                onChange={(event) => {
+                  if (event.target.value === NEW_CHILD_VALUE) {
+                    setChildMode("new");
+                    return;
+                  }
+                  setChildMode("existing");
+                  setChildId(event.target.value);
+                }}
+              >
+                {children.map((child) => (
+                  <option key={child.id} value={child.id}>{child.firstName} {child.lastName}</option>
+                ))}
+                <option value={NEW_CHILD_VALUE}>Dodaj nowe dziecko</option>
+              </select>
+            </div>
+
+            {childMode === "new" ? (
+              <div className="grid grid-2">
+                <div className="field">
+                  <label>Imię</label>
+                  <input className="input" value={newChild.firstName} onChange={(event) => updateNewChild("firstName", event.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Nazwisko</label>
+                  <input className="input" value={newChild.lastName} onChange={(event) => updateNewChild("lastName", event.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Data urodzenia</label>
+                  <input className="input" type="date" value={newChild.birthDate} onChange={(event) => updateNewChild("birthDate", event.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Placówka</label>
+                  <input className="input" value={newChild.school} onChange={(event) => updateNewChild("school", event.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Klasa/grupa</label>
+                  <input className="input" value={newChild.classGroup} onChange={(event) => updateNewChild("classGroup", event.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Rodzice/opiekunowie</label>
+                  <input className="input" value={newChild.guardians} onChange={(event) => updateNewChild("guardians", event.target.value)} />
+                </div>
+              </div>
+            ) : null}
+
+            <button className="button accent" type="button" onClick={saveDraft} disabled={!canSaveDraft || pending}>
+              Zapisz i przejdź do plików
             </button>
-          </div>
-        </div>
-        {createdDocument?.files?.length ? (
-          <ul style={{ margin: 0, paddingLeft: "20px" }}>
-            {createdDocument.files.map((item) => <li key={item.id}>{item.originalName}</li>)}
-          </ul>
-        ) : (
-          <p className="muted" style={{ fontSize: "12px" }}>Dodaj co najmniej jeden plik źródłowy przed generowaniem opinii WWR.</p>
-        )}
-        <button className="button accent" type="button" onClick={generateFromSources} disabled={!createdDocument || !createdDocument.files?.length || pending}>
-          <Sparkles size={18} aria-hidden />
-          Generuj z wzoru i załączników
-        </button>
-        <p className="muted" style={{ fontSize: "12px" }}>Pliki są zapisywane lokalnie i przekazywane do generatora jako materiał źródłowy. Treść obrazów wymaga ręcznego opisania w notatkach, jeśli nie ma OCR.</p>
+          </>
+        ) : null}
+
+        {step === "files" && createdDocument ? (
+          <>
+            <div className="toolbar">
+              <h2>Dokumenty źródłowe</h2>
+              <button className="button secondary" type="button" onClick={() => setStep("child")} disabled={pending || uploading}>
+                Wróć
+              </button>
+            </div>
+            <div className="field">
+              <label>Dodaj plik</label>
+              <input
+                key={fileInputKey}
+                className="input"
+                type="file"
+                accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={uploadSelectedFile}
+                disabled={uploading || pending}
+              />
+            </div>
+            {uploading ? <p className="muted">Dodaję plik...</p> : null}
+            {createdDocument.files?.length ? (
+              <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "grid", gap: "8px" }}>
+                {createdDocument.files.map((item) => (
+                  <li key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+                    <span>{item.originalName}</span>
+                    <button className="icon-button" type="button" onClick={() => removeFile(item.id)} disabled={pending || uploading} aria-label={`Usuń ${item.originalName}`}>
+                      <Trash2 size={16} aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">Dodaj co najmniej jeden dokument źródłowy.</p>
+            )}
+            <button className="button accent" type="button" onClick={generateFromSources} disabled={!createdDocument.files?.length || pending || uploading}>
+              <Sparkles size={18} aria-hidden />
+              Generuj
+            </button>
+          </>
+        ) : null}
+
+        {step === "preview" && createdDocument ? (
+          <>
+            <div className="toolbar">
+              <h2>Podgląd dokumentu</h2>
+              <a className="button secondary" href={`/api/documents/${createdDocument.id}/export`}>
+                <Download size={18} aria-hidden />
+                Pobierz DOCX
+              </a>
+            </div>
+            {createdDocument.validationStatus ? (
+              <div className="alert">
+                Status zgodności ze wzorem: {createdDocument.validationStatus === "VALID" ? "zgodny" : createdDocument.validationStatus === "NEEDS_FIX" ? "wymaga poprawy" : "niezwalidowany"}
+              </div>
+            ) : null}
+            <textarea
+              className="textarea document-preview"
+              value={generatedContent}
+              onChange={(event) => setGeneratedContent(event.target.value)}
+              placeholder="Po wygenerowaniu dokumentu tutaj pojawi się podgląd treści."
+            />
+          </>
+        ) : null}
       </section>
+    </div>
+  );
+}
+
+const generationSteps = [
+  "Krok 1/6 - Odczytywanie dokumentów",
+  "Krok 2/6 - Tworzenie profilu dziecka",
+  "Krok 3/6 - Analiza wzoru",
+  "Krok 4/6 - Generowanie treści",
+  "Krok 5/6 - Składanie dokumentu",
+  "Krok 6/6 - Kontrola jakości"
+];
+
+function GenerationOverlay({ generationStep, generationPercent }: { generationStep: number; generationPercent: number }) {
+  return (
+    <div className="generation-overlay" role="status" aria-live="polite">
+      <div className="generation-card">
+        <div className="generation-spinner">
+          <LoaderCircle size={34} aria-hidden />
+        </div>
+        <div>
+          <h2>pAgent przygotowuje dokument</h2>
+          <p>Analizujemy załączone materiały, łączymy informacje i uzupełniamy wzór opinii.</p>
+        </div>
+        <div className="generation-progress" aria-hidden>
+          <span style={{ width: `${Math.max(12, generationPercent)}%` }} />
+        </div>
+        <p className="muted" style={{ fontSize: "12px", margin: 0 }}>{generationPercent}% wykonania</p>
+        <ol className="generation-steps">
+          {generationSteps.map((step, index) => (
+            <li className={index < generationStep ? "done" : index === generationStep ? "active" : ""} key={step}>
+              {index < generationStep ? <CheckCircle2 size={18} aria-hidden /> : <span>{index + 1}</span>}
+              {step}
+            </li>
+          ))}
+        </ol>
       </div>
     </div>
   );
