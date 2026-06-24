@@ -536,6 +536,14 @@ export function repairGluedPolishText(value: string) {
     .replace(/\bwspomagającąlub\b/gi, "wspomagającą lub")
     .replace(/\balternatywnąmetodąkomunikacji\b/gi, "alternatywną metodą komunikacji")
     .replace(/\bmetodąkomunikacji\b/gi, "metodą komunikacji")
+    .replace(/\bwystępującychw\b/gi, "występujących w")
+    .replace(/\bzuwzględnieniem\b/gi, "z uwzględnieniem")
+    .replace(/\bjegośrodowisku\b/gi, "jego środowisku")
+    .replace(/\bwychowaniainauczania\b/gi, "wychowania i nauczania")
+    .replace(/\bwychowaniai nauczania\b/gi, "wychowania i nauczania")
+    .replace(/\bwramach\b/gi, "w ramach")
+    .replace(/([,;:])(?=\S)/g, "$1 ")
+    .replace(/([.!?])(?=[A-ZĄĆĘŁŃÓŚŹŻ])/g, "$1 ")
     .replace(/\s+/g, " ")
     .trim();
 }

@@ -502,12 +502,33 @@ function extractBalancedJsonObject(text: string) {
 
 function parseSingleFieldAnswer(text: string) {
   const cleaned = text.trim();
+  const malformedJsonContent = recoverMalformedContentJson(cleaned);
+  if (malformedJsonContent !== null) return malformedJsonContent;
   try {
     const parsed = parseFieldJson(cleaned);
     return parsed.content || parsed.answer || parsed.text || Object.values(parsed)[0] || cleaned;
   } catch {
-    return cleaned;
+    return looksLikeJsonArtifact(cleaned) ? "" : cleaned;
   }
+}
+
+function recoverMalformedContentJson(text: string) {
+  if (!/[{"]\s*content\s*["']?\s*:/i.test(text)) return null;
+  const contentMatch = text.match(/["']content["']\s*:\s*["']([\s\S]*)$/i);
+  if (!contentMatch) return "";
+  const recovered = contentMatch[1]
+    .replace(/["']?\s*[}]?\s*$/g, "")
+    .trim();
+  return looksLikeJsonArtifact(recovered) ? "" : recovered;
+}
+
+function looksLikeJsonArtifact(text: string) {
+  const trimmed = text.trim();
+  return (
+    !trimmed ||
+    /^[\\/"'{}[\],:\s]+$/.test(trimmed) ||
+    /^\{?\s*["']?content["']?\s*:\s*["']?\s*$/i.test(trimmed)
+  );
 }
 
 function parseChildProfileAnswer(text: string) {
