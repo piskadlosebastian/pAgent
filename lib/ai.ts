@@ -4,6 +4,10 @@ import { asTemplateSections, composeFromTemplate, extractDocxTemplateSections, r
 
 export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś specjalistycznym asystentem pAgent wspierającym przygotowanie projektów opinii WWR. Twoim zadaniem jest wypełnianie konkretnych pól wzoru dokumentu na podstawie wszystkich załączonych dokumentów źródłowych. Nie piszesz dokumentu od zera. Nie zmieniasz wzoru. Nie streszczasz nadmiernie. Tworzysz rozbudowane, merytoryczne i formalne opisy funkcjonowania dziecka, zgodne z pytaniem danego pola. Łączysz informacje z wielu dokumentów w jedną spójną wypowiedź. Nie kopiujesz całych dokumentów. Nie powtarzasz tych samych akapitów. Nie tworzysz faktów, których nie ma w źródłach. Jeżeli dane są niepełne, zaznaczasz to rzeczowo. Styl ma być zgodny z dokumentacją poradni psychologiczno-pedagogicznej.`;
 
+const PROFILE_AGENT_TIMEOUT_MS = 45_000;
+const FIELD_AGENT_TIMEOUT_MS = 35_000;
+const ENABLE_FIELD_EXPANSION = process.env.ENABLE_FIELD_EXPANSION === "true";
+
 export function anonymizeData(text: string, child: Child): string {
   let anonymized = text;
   if (child.firstName) anonymized = anonymized.replaceAll(child.firstName, "[DZIECKO_1]");
@@ -121,7 +125,7 @@ async function generateFieldsWithOnlineAgent(
     for (const agent of agents) {
       if (unavailableAgentIds.has(agent.id)) continue;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 90_000);
+      const timeout = setTimeout(() => controller.abort(), FIELD_AGENT_TIMEOUT_MS);
 
       try {
         const prompt = buildFieldPrompt(input, section, output);
@@ -131,7 +135,7 @@ async function generateFieldsWithOnlineAgent(
             ? await callOpenRouterAgent(agent, prompt, controller.signal)
             : await callPollinationsAgent(agent, prompt, controller.signal);
         generated = sanitizeFieldAnswer(parseSingleFieldAnswer(raw), input.sourceTexts, Object.values(output));
-        if (shouldExpandField(section, generated, input.sourceTexts)) {
+        if (ENABLE_FIELD_EXPANSION && shouldExpandField(section, generated, input.sourceTexts)) {
           try {
             const expanded = await expandFieldAnswer(input, section, generated, output, agent, controller.signal);
             generated = sanitizeFieldAnswer(expanded, input.sourceTexts, Object.values(output)) || generated;
@@ -145,7 +149,7 @@ async function generateFieldsWithOnlineAgent(
         }
         break;
       } catch (error) {
-        if (isConfigurationOrQuotaError(error)) unavailableAgentIds.add(agent.id);
+        if (isConfigurationOrQuotaError(error) || isSlowOrNetworkError(error)) unavailableAgentIds.add(agent.id);
         console.warn("[AI] Field agent failed, trying fallback", {
           field: section.title,
           agentId: agent.id,
@@ -176,7 +180,7 @@ async function generateChildProfileWithOnlineAgent(
   for (const agent of agents) {
     if (unavailableAgentIds.has(agent.id)) continue;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120_000);
+    const timeout = setTimeout(() => controller.abort(), PROFILE_AGENT_TIMEOUT_MS);
     try {
       const raw = agent.provider === "gemini"
         ? await callGeminiAgent(agent, buildChildProfilePrompt(input), controller.signal)
@@ -185,7 +189,7 @@ async function generateChildProfileWithOnlineAgent(
           : await callPollinationsAgent(agent, buildChildProfilePrompt(input), controller.signal);
       return sanitizeProfile(parseChildProfileAnswer(raw));
     } catch (error) {
-      if (isConfigurationOrQuotaError(error)) unavailableAgentIds.add(agent.id);
+      if (isConfigurationOrQuotaError(error) || isSlowOrNetworkError(error)) unavailableAgentIds.add(agent.id);
       console.warn("[AI] Profile agent failed, trying fallback", {
         agentId: agent.id,
         provider: agent.provider,
@@ -234,7 +238,7 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
 
   for (const section of sections) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 90_000);
+    const timeout = setTimeout(() => controller.abort(), FIELD_AGENT_TIMEOUT_MS);
 
     try {
       const response = await fetch(`${apiUrl.replace(/\/$/, "")}/chat-messages`, {
@@ -339,6 +343,20 @@ function isConfigurationOrQuotaError(error: unknown) {
     message.includes("401") ||
     message.includes("403") ||
     message.includes("404")
+  );
+}
+
+function isSlowOrNetworkError(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  const message = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("abort") ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("fetch failed") ||
+    message.includes("econnreset") ||
+    message.includes("etimedout") ||
+    message.includes("enotfound")
   );
 }
 
@@ -782,6 +800,7 @@ function shouldExpandField(section: TemplateSection, answer: string, sourceTexts
 
 function findShortGeneratedFields(sections: TemplateSection[], aiSections?: Record<string, string>, sourceTexts?: string[]) {
   if (!aiSections) return [];
+  if (!ENABLE_FIELD_EXPANSION) return [];
   return sections
     .filter((section) => shouldExpandField(section, (section.fieldId ? aiSections[section.fieldId] : "") || aiSections[section.title] || "", sourceTexts))
     .map((section) => section.instruction ?? section.title);
