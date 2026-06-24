@@ -533,6 +533,19 @@ export function repairGluedPolishText(value: string) {
     .trim();
 }
 
+export function repairGluedPolishTextPreservingLayout(value: string) {
+  if (!value) return "";
+  return value
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => repairGluedPolishText(line))
+    .join("\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function repairTemplateContextText(value: string) {
   return repairGluedPolishText(value);
 }

@@ -95,6 +95,7 @@ function replaceParagraphWithSingleBlock(paragraph: string, replacement: string)
 function splitReplacementBlocks(replacement: string, preferList: boolean) {
   return replacement
     .replace(/\r/g, "")
+    .replace(/\n+/g, "\n\n")
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[\).])\s+)/)
     .map((block) => {
       const cleaned = block.replace(/\s+/g, " ").trim();

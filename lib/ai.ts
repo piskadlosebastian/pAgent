@@ -1,6 +1,6 @@
 import type { Child, DocumentTemplate, KnowledgeExample, UploadedFile } from "../generated/prisma/client";
 import { getAiAgent, type AiAgentDefinition, type AiAgentId } from "@/lib/ai-agents";
-import { asTemplateSections, composeFromTemplate, extractDocxTemplateSections, repairGluedPolishText, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
+import { asTemplateSections, composeFromTemplate, extractDocxTemplateSections, repairGluedPolishTextPreservingLayout, validateAgainstTemplate, type TemplateSection, type ValidationReport } from "@/lib/document-knowledge";
 
 export const PPP_AGENT_SYSTEM_PROMPT = `Jesteś specjalistycznym asystentem pAgent wspierającym przygotowanie projektów opinii WWR. Twoim zadaniem jest wypełnianie konkretnych pól wzoru dokumentu na podstawie wszystkich załączonych dokumentów źródłowych. Nie piszesz dokumentu od zera. Nie zmieniasz wzoru. Nie streszczasz nadmiernie. Tworzysz rozbudowane, merytoryczne i formalne opisy funkcjonowania dziecka, zgodne z pytaniem danego pola. Łączysz informacje z wielu dokumentów w jedną spójną wypowiedź. Nie kopiujesz całych dokumentów. Nie powtarzasz tych samych akapitów. Nie tworzysz faktów, których nie ma w źródłach. Jeżeli dane są niepełne, zaznaczasz to rzeczowo. Styl ma być zgodny z dokumentacją poradni psychologiczno-pedagogicznej.`;
 
@@ -61,7 +61,7 @@ export async function generateOpinionDraft(input: {
   }
 
   const templateForGeneration = { ...input.template, sections };
-  const content = repairGluedPolishText(composeFromTemplate({
+  const content = repairGluedPolishTextPreservingLayout(composeFromTemplate({
     template: templateForGeneration,
     child: input.child,
     documentType: input.documentType,
@@ -317,7 +317,7 @@ function getOnlineFallbackAgents(selectedAgent: AiAgentDefinition) {
 
 function repairGeneratedSections(sections: Record<string, string>) {
   return Object.fromEntries(
-    Object.entries(sections).map(([key, value]) => [key, repairGluedPolishText(value)])
+    Object.entries(sections).map(([key, value]) => [key, repairGluedPolishTextPreservingLayout(value)])
   );
 }
 
@@ -665,7 +665,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
 }
 
 function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], previousAnswers: string[] = []) {
-  const cleaned = repairGluedPolishText((answer ?? "")
+  const cleaned = ensureReadableFieldLayout(repairGluedPolishTextPreservingLayout((answer ?? "")
     .replace(/^```(?:json|text)?/i, "")
     .replace(/```$/i, "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -677,13 +677,36 @@ function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], pre
     .replace(/Treść wymaga uzupełnienia[^.\n]*(\.|\n)?/gi, "")
     .replace(/^Plik\s+[^:\n]+:\s*/gim, "")
     .replace(/\n{3,}/g, "\n\n")
-    .trim());
+    .trim()));
 
   if (hasCopiedSourceFragment(cleaned, sourceTexts) || repeatsPreviousAnswer(cleaned, previousAnswers)) {
     return "Brak danych w załączonych materiałach.";
   }
 
   return cleaned || "Brak danych w załączonych materiałach.";
+}
+
+function ensureReadableFieldLayout(answer: string) {
+  const trimmed = answer.trim();
+  if (!trimmed || trimmed.includes("\n") || trimmed.length < 700) return trimmed;
+
+  const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [trimmed];
+  if (sentences.length < 4) return trimmed;
+
+  const paragraphs: string[] = [];
+  let current = "";
+  for (const sentence of sentences) {
+    const sentenceCount = current.split(/[.!?]+/).filter(Boolean).length;
+    const next = [current, sentence].filter(Boolean).join(" ");
+    if (current && (next.length > 520 || sentenceCount >= 3)) {
+      paragraphs.push(current);
+      current = sentence;
+    } else {
+      current = next;
+    }
+  }
+  if (current) paragraphs.push(current);
+  return paragraphs.join("\n\n");
 }
 
 function selectRelevantSourceFragments(section: TemplateSection, sourceTexts?: string[]) {
