@@ -24,6 +24,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:3001:3000"
     expose:
       - "3000"
     volumes:
@@ -32,25 +34,8 @@ services:
       - pagent-examples:/app/storage/examples
     command: sh -c "npx prisma migrate deploy && npm run start"
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on:
-      - app
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-
 volumes:
   pagent-postgres-data:
   pagent-uploads:
   pagent-templates:
   pagent-examples:
-  caddy-data:
-  caddy-config:
