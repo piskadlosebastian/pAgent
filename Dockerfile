@@ -15,7 +15,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN apk add --no-cache libreoffice ttf-dejavu
+RUN apk add --no-cache libreoffice tesseract-ocr tesseract-ocr-data-pol tesseract-ocr-data-eng ttf-dejavu
 
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/package-lock.json ./package-lock.json

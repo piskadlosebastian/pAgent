@@ -67,6 +67,7 @@ export default function NewOpinionPage() {
   const [childMode, setChildMode] = useState<"existing" | "new">("existing");
   const [childId, setChildId] = useState("");
   const [documentType, setDocumentType] = useState<DocumentKind>("WWR");
+  const [specialistNotes, setSpecialistNotes] = useState("");
   const [newChild, setNewChild] = useState({
     firstName: "",
     lastName: "",
@@ -154,7 +155,7 @@ export default function NewOpinionPage() {
         type: selectedDocumentType.label,
         pppType: selectedDocumentType.value,
         status: "DRAFT",
-        specialistNotes: null,
+        specialistNotes: specialistNotes.trim() || null,
         generatedContent: "",
         generateDraft: false
       })
@@ -377,6 +378,17 @@ export default function NewOpinionPage() {
                 </div>
               </>
             ) : null}
+
+            <div className="field">
+              <label>Uwagi dla agenta</label>
+              <textarea
+                className="textarea"
+                value={specialistNotes}
+                onChange={(event) => setSpecialistNotes(event.target.value)}
+                placeholder="Np. KS będzie wydany ze względu na afazję. Agent uwzględni tę informację podczas opisu."
+                rows={4}
+              />
+            </div>
 
             <button className="button accent" type="button" onClick={saveDraft} disabled={!canSaveDraft || pending}>
               {childMode === "new" ? "Zapisz dziecko i przejdź do plików" : "Przejdź do plików"}

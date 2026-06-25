@@ -4,6 +4,7 @@ import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 import WordExtractor from "word-extractor";
 import type { Child, DocumentTemplate, KnowledgeExample, PppDocumentType, UploadedFile } from "../generated/prisma/client";
+import { extractImageText } from "./ocr";
 
 export const PPP_DOCUMENT_TYPES: { value: PppDocumentType; label: string }[] = [
   { value: "KS", label: "KS" },
@@ -103,6 +104,9 @@ export async function extractPlainText(storagePath: string, mimeType?: string | 
   }
   if (mimeType?.startsWith("text/") || fileHasExtension(fileName ?? storagePath, [".txt"])) {
     return normalizeText(await readFile(storagePath, "utf8"));
+  }
+  if (mimeType?.startsWith("image/") || fileHasExtension(fileName ?? storagePath, [".png", ".jpg", ".jpeg"])) {
+    return normalizeText(await extractImageText(storagePath));
   }
   return "";
 }

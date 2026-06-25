@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, FileText, Save, Trash2 } from "lucide-react";
+import { Download, FileText, LoaderCircle, RotateCcw, Save, Trash2 } from "lucide-react";
 
 type DocumentItem = {
   id: string;
@@ -16,6 +16,26 @@ type DocumentItem = {
   childId: string;
   child: { firstName: string; lastName: string };
   files: { id: string; originalName: string }[];
+};
+
+type GenerationProgress = {
+  step: string;
+  message: string;
+  percent: number;
+};
+
+type GenerationJobResponse = {
+  jobId?: string;
+  status: "queued" | "running" | "completed" | "failed";
+  progress?: GenerationProgress;
+  result?: DocumentItem;
+  error?: string;
+};
+
+const initialGenerationProgress: GenerationProgress = {
+  step: "Kolejka",
+  message: "Przygotowuję ponowne generowanie dokumentu.",
+  percent: 0
 };
 
 const statuses = [
@@ -51,6 +71,9 @@ export default function DocumentsPage() {
   const [status, setStatus] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [content, setContent] = useState("");
+  const [generationPending, setGenerationPending] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(initialGenerationProgress);
+  const [message, setMessage] = useState("");
 
   async function loadDocuments() {
     const query = status ? `?status=${status}` : "";
@@ -79,6 +102,49 @@ export default function DocumentsPage() {
     await loadDocuments();
   }
 
+  async function regenerateSelected() {
+    if (!selected) return;
+    if (!selected.files.length) {
+      setMessage("Dokument nie ma załączników. Dodaj pliki źródłowe przed ponownym generowaniem.");
+      return;
+    }
+
+    setMessage("");
+    setGenerationPending(true);
+    setGenerationProgress(initialGenerationProgress);
+    try {
+      const response = await fetch(`/api/documents/${selected.id}/generate/start`, { method: "POST" });
+      const started = await response.json().catch(() => ({})) as GenerationJobResponse;
+      if (!response.ok || !started.jobId) {
+        throw new Error(started.error ?? "Nie udało się uruchomić ponownego generowania.");
+      }
+      if (started.progress) setGenerationProgress(started.progress);
+      const updatedDocument = await waitForGenerationJob(started.jobId);
+      setDocuments((items) => items.map((item) => item.id === updatedDocument.id ? updatedDocument : item));
+      setSelectedId(updatedDocument.id);
+      setContent(updatedDocument.generatedContent ?? "");
+      setMessage("Dokument został wygenerowany ponownie z dotychczasowych załączników.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nie udało się wygenerować dokumentu ponownie.");
+    } finally {
+      setGenerationPending(false);
+    }
+  }
+
+  async function waitForGenerationJob(jobId: string) {
+    while (true) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      const response = await fetch(`/api/generation-jobs/${jobId}`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({})) as GenerationJobResponse;
+      if (!response.ok) {
+        throw new Error(data.error ?? "Nie udało się pobrać postępu generowania.");
+      }
+      if (data.progress) setGenerationProgress(data.progress);
+      if (data.status === "completed" && data.result) return data.result;
+      if (data.status === "failed") throw new Error(data.error ?? "Nie udało się wygenerować dokumentu.");
+    }
+  }
+
   async function remove(id: string) {
     await fetch(`/api/documents/${id}`, { method: "DELETE" });
     if (selectedId === id) setSelectedId(null);
@@ -97,6 +163,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="documents-layout">
+      {generationPending ? <GenerationOverlay progress={generationProgress} /> : null}
       <section className="panel documents-list-panel">
         <div className="toolbar documents-toolbar">
           <div className="page-title">
@@ -109,6 +176,7 @@ export default function DocumentsPage() {
             ))}
           </select>
         </div>
+        {message ? <div className="alert">{message}</div> : null}
 
         <div className="documents-list">
           {documents.map((document) => (
@@ -172,10 +240,16 @@ export default function DocumentsPage() {
       <section className="panel documents-preview-panel">
         <div className="toolbar">
           <h2>Podgląd i edycja</h2>
-          <button className="button accent" type="button" onClick={saveSelected} disabled={!selected}>
-            <Save size={18} aria-hidden />
-            Zapisz
-          </button>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button className="button secondary" type="button" onClick={regenerateSelected} disabled={!selected || generationPending}>
+              <RotateCcw size={18} aria-hidden />
+              Generuj ponownie
+            </button>
+            <button className="button accent" type="button" onClick={saveSelected} disabled={!selected}>
+              <Save size={18} aria-hidden />
+              Zapisz
+            </button>
+          </div>
         </div>
 
         {selected ? (
@@ -214,6 +288,27 @@ export default function DocumentsPage() {
           <p className="muted">Wybierz dokument z listy.</p>
         )}
       </section>
+    </div>
+  );
+}
+
+function GenerationOverlay({ progress }: { progress: GenerationProgress }) {
+  const percent = Math.max(0, Math.min(100, Math.round(progress.percent)));
+  return (
+    <div className="generation-overlay" role="status" aria-live="polite">
+      <div className="generation-card">
+        <div className="generation-spinner">
+          <LoaderCircle size={34} aria-hidden />
+        </div>
+        <div>
+          <h2>{progress.step || "pAgent generuje dokument ponownie"}</h2>
+          <p>{progress.message || "Pracuję na dotychczasowych załącznikach i aktywnym wzorze."}</p>
+        </div>
+        <div className="generation-progress" aria-hidden>
+          <span style={{ width: `${Math.max(8, percent)}%` }} />
+        </div>
+        <p className="muted" style={{ fontSize: "12px", margin: 0 }}>{percent}% wykonania</p>
+      </div>
     </div>
   );
 }
