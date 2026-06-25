@@ -56,13 +56,14 @@ export async function generateDocumentForUser(input: {
   }
 
   progress("Odczytywanie dokumentów", "Odczytuję tekst z załączonych plików.", 10);
+  const perFileTextLimit = document.files.length > 6 ? 3200 : document.files.length > 4 ? 4200 : 6000;
   const sourceTexts = (
     await Promise.all(
       document.files.map(async (file, index) => {
         progress("Odczytywanie dokumentów", `Odczytuję plik ${index + 1} z ${document.files.length}: ${file.originalName}`, 10 + ((index + 1) / document.files.length) * 12);
         const text = await extractPlainText(file.storagePath, file.mimeType, file.originalName);
         if (!text) return "";
-        return `Plik ${file.originalName}:\n${text.slice(0, 6000)}`;
+        return `Plik ${file.originalName}:\n${text.slice(0, perFileTextLimit)}`;
       })
     )
   ).filter(Boolean);

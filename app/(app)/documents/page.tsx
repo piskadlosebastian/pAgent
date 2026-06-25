@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, Save, Trash2 } from "lucide-react";
+import { Download, FileText, Save, Trash2 } from "lucide-react";
 
 type DocumentItem = {
   id: string;
@@ -121,10 +121,11 @@ export default function DocumentsPage() {
                   setContent(document.generatedContent ?? "");
                 }}
               >
+                <span className="document-row-child">
+                  {document.child.firstName} {document.child.lastName}
+                </span>
                 <span className="document-row-title">{document.title}</span>
                 <span className="document-row-meta">
-                  {document.child.firstName} {document.child.lastName}
-                  <span aria-hidden>•</span>
                   {new Date(document.createdAt).toLocaleDateString("pl-PL")}
                   <span aria-hidden>•</span>
                   {document.files.length} plików
@@ -146,6 +147,19 @@ export default function DocumentsPage() {
                   <Trash2 size={16} aria-hidden />
                 </button>
               </div>
+
+              <details className="document-row-files">
+                <summary>
+                  <FileText size={15} aria-hidden />
+                  Załączniki ({document.files.length})
+                </summary>
+                <ul>
+                  {document.files.map((file) => (
+                    <li key={file.id}>{file.originalName}</li>
+                  ))}
+                  {!document.files.length ? <li className="muted">Brak plików</li> : null}
+                </ul>
+              </details>
             </article>
           ))}
 

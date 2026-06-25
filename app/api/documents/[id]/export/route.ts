@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { buildOpinionDocx } from "@/lib/docx";
 import { buildDocxFromTemplate } from "@/lib/docx-template";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -18,20 +19,41 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   });
   if (!document) return NextResponse.json({ error: "Nie znaleziono dokumentu." }, { status: 404 });
 
-  const templateBasedDocx = await getTemplateBasedDocx(document);
+  const templateBasedDocx = await getTemplateBasedDocx(document).catch((error) => {
+    console.error("[DOCX_EXPORT] Template export failed", {
+      documentId: document.id,
+      templateId: document.templateId,
+      templateName: document.template?.originalName,
+      error: error instanceof Error ? error.message : "UNKNOWN_ERROR"
+    });
+    return null;
+  });
   if (!templateBasedDocx) {
-    return NextResponse.json(
-      { error: "Nie udało się przygotować DOCX na podstawie aktywnego wzoru. Wygeneruj dokument ponownie albo sprawdź wzór." },
-      { status: 409 }
-    );
+    if (!document.generatedContent?.trim()) {
+      return NextResponse.json(
+        { error: "Nie udało się przygotować DOCX, ponieważ dokument nie ma zapisanej treści. Wygeneruj dokument ponownie." },
+        { status: 409 }
+      );
+    }
+    console.warn("[DOCX_EXPORT] Falling back to text DOCX export", {
+      documentId: document.id,
+      templateId: document.templateId
+    });
+    const fallbackDocx = await buildOpinionDocx(document.title, document.generatedContent);
+    await writeAuditLog({ userId: user.id, action: "export-docx-fallback", entity: "Document", entityId: id });
+    return createDocxResponse(fallbackDocx, document.title);
   }
 
   await writeAuditLog({ userId: user.id, action: "export-docx", entity: "Document", entityId: id });
 
-  return new NextResponse(new Uint8Array(templateBasedDocx), {
+  return createDocxResponse(templateBasedDocx, document.title);
+}
+
+function createDocxResponse(buffer: Buffer | Uint8Array, title: string) {
+  return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "Content-Disposition": `attachment; filename="${document.title.replace(/[^a-z0-9-_]+/gi, "_")}.docx"`
+      "Content-Disposition": `attachment; filename="${title.replace(/[^a-z0-9-_]+/gi, "_")}.docx"`
     }
   });
 }

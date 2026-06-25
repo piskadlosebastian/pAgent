@@ -669,8 +669,21 @@ h2 {
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-row-child {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 850;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -700,6 +713,61 @@ h2 {
 
 .document-row-actions .icon-button:first-child {
   color: var(--primary);
+}
+
+.document-row-files {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(236, 232, 242, 0.78);
+}
+
+.document-row-files summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+  list-style: none;
+  cursor: pointer;
+}
+
+.document-row-files summary::-webkit-details-marker {
+  display: none;
+}
+
+.document-row-files summary::after {
+  content: "v";
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.document-row-files[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.document-row-files ul {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.document-row-files li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 7px 10px;
+  border: 1px solid rgba(236, 232, 242, 0.9);
+  border-radius: 12px;
+  background: rgba(247, 244, 250, 0.72);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .documents-empty {
@@ -1352,6 +1420,10 @@ h2 {
   }
 
   .document-row-title {
+    white-space: normal;
+  }
+
+  .document-row-child {
     white-space: normal;
   }
 }
