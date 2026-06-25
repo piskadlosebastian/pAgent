@@ -74,6 +74,8 @@ export default function DocumentsPage() {
   const [generationPending, setGenerationPending] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(initialGenerationProgress);
   const [message, setMessage] = useState("");
+  const [regenerateNotesOpen, setRegenerateNotesOpen] = useState(false);
+  const [regenerateNotes, setRegenerateNotes] = useState("");
 
   async function loadDocuments() {
     const query = status ? `?status=${status}` : "";
@@ -113,6 +115,20 @@ export default function DocumentsPage() {
     setGenerationPending(true);
     setGenerationProgress(initialGenerationProgress);
     try {
+      const saved = await fetch(`/api/documents/${selected.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...selected,
+          specialistNotes: regenerateNotes.trim() || null,
+          generatedContent: content
+        })
+      });
+      if (!saved.ok) {
+        const data = await saved.json().catch(() => ({}));
+        throw new Error(data.error ?? "Nie udało się zapisać uwag przed ponownym generowaniem.");
+      }
+
       const response = await fetch(`/api/documents/${selected.id}/generate/start`, { method: "POST" });
       const started = await response.json().catch(() => ({})) as GenerationJobResponse;
       if (!response.ok || !started.jobId) {
@@ -123,6 +139,7 @@ export default function DocumentsPage() {
       setDocuments((items) => items.map((item) => item.id === updatedDocument.id ? updatedDocument : item));
       setSelectedId(updatedDocument.id);
       setContent(updatedDocument.generatedContent ?? "");
+      setRegenerateNotesOpen(false);
       setMessage("Dokument został wygenerowany ponownie z dotychczasowych załączników.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nie udało się wygenerować dokumentu ponownie.");
@@ -159,6 +176,13 @@ export default function DocumentsPage() {
       body: JSON.stringify({ decision })
     });
     await loadDocuments();
+  }
+
+  function prepareRegeneration() {
+    if (!selected) return;
+    setMessage("");
+    setRegenerateNotes(selected.specialistNotes ?? "");
+    setRegenerateNotesOpen(true);
   }
 
   return (
@@ -241,7 +265,7 @@ export default function DocumentsPage() {
         <div className="toolbar">
           <h2>Podgląd i edycja</h2>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <button className="button secondary" type="button" onClick={regenerateSelected} disabled={!selected || generationPending}>
+            <button className="button secondary" type="button" onClick={prepareRegeneration} disabled={!selected || generationPending}>
               <RotateCcw size={18} aria-hidden />
               Generuj ponownie
             </button>
@@ -261,6 +285,34 @@ export default function DocumentsPage() {
               </span>
               <span className="badge">{learningDecisionLabel(selected.learningDecision)}</span>
             </div>
+
+            {regenerateNotesOpen ? (
+              <div className="card">
+                <h2>Uwagi do ponownego generowania</h2>
+                <p className="muted">
+                  Możesz dopisać informacje, które agent ma uwzględnić w nowej wersji dokumentu. Załączniki pozostaną te same.
+                </p>
+                <div className="field" style={{ marginTop: "14px" }}>
+                  <label>Uwagi dla agenta</label>
+                  <textarea
+                    className="textarea"
+                    value={regenerateNotes}
+                    onChange={(event) => setRegenerateNotes(event.target.value)}
+                    rows={5}
+                    placeholder="Np. KS będzie wydany ze względu na afazję. Agent uwzględni tę informację podczas opisu."
+                  />
+                </div>
+                <div className="toolbar">
+                  <button className="button accent" type="button" onClick={regenerateSelected} disabled={generationPending}>
+                    <RotateCcw size={18} aria-hidden />
+                    Rozpocznij generowanie
+                  </button>
+                  <button className="button secondary" type="button" onClick={() => setRegenerateNotesOpen(false)} disabled={generationPending}>
+                    Anuluj
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <textarea className="textarea document-preview" value={content} onChange={(event) => setContent(event.target.value)} />
 
