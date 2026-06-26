@@ -15,6 +15,7 @@ type ChildItem = {
 type UploadedItem = {
   id: string;
   originalName: string;
+  relatedFiles?: UploadedItem[];
 };
 
 type DocumentKind = "KS" | "WWR" | "OPINIA_PPP" | "INNE";
@@ -199,6 +200,9 @@ export default function NewOpinionPage() {
 
       const uploaded = await response.json() as UploadedItem;
       uploadedFiles.push({ id: uploaded.id, originalName: uploaded.originalName });
+      uploaded.relatedFiles?.forEach((file) => {
+        uploadedFiles.push({ id: file.id, originalName: file.originalName });
+      });
     }
 
     if (uploadedFiles.length) {
@@ -223,9 +227,11 @@ export default function NewOpinionPage() {
       setMessage("Nie udało się usunąć pliku.");
       return;
     }
+    const removedFile = createdDocument.files?.find((file) => file.id === fileId);
+    const relatedOcrName = removedFile ? `OCR - ${removedFile.originalName}.txt` : "";
     setCreatedDocument({
       ...createdDocument,
-      files: (createdDocument.files ?? []).filter((file) => file.id !== fileId)
+      files: (createdDocument.files ?? []).filter((file) => file.id !== fileId && file.originalName !== relatedOcrName)
     });
   }
 

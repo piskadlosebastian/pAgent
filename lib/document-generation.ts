@@ -3,6 +3,7 @@ import { generateOpinionDraft, type GenerationProgressEvent } from "@/lib/ai";
 import { getAiAgent } from "@/lib/ai-agents";
 import { buildDocxFromTemplate } from "@/lib/docx-template";
 import { buildKnowledgeQuery, extractPlainText, findSimilarExamples, inferPppType } from "@/lib/document-knowledge";
+import { isOcrSourceFile, materializeDocumentOcrTextAttachments } from "@/lib/ocr-attachments";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -56,11 +57,18 @@ export async function generateDocumentForUser(input: {
   }
 
   progress("Odczytywanie dokumentów", "Odczytuję tekst z załączonych plików.", 10);
-  const perFileTextLimit = document.files.length > 6 ? 3200 : document.files.length > 4 ? 4200 : 6000;
+  await materializeDocumentOcrTextAttachments(document.files);
+  const sourceFiles = await prisma.uploadedFile.findMany({
+    where: { documentId, userId: user.id },
+    orderBy: { createdAt: "asc" }
+  });
+  const ocrAttachmentNames = new Set(sourceFiles.map((file) => file.storedName).filter((name) => name.endsWith(".ocr.txt")));
+  const filesToRead = sourceFiles.filter((file) => !(isOcrSourceFile(file) && ocrAttachmentNames.has(`${file.id}.ocr.txt`)));
+  const perFileTextLimit = filesToRead.length > 6 ? 3200 : filesToRead.length > 4 ? 4200 : 6000;
   const sourceTexts = (
     await Promise.all(
-      document.files.map(async (file, index) => {
-        progress("Odczytywanie dokumentów", `Odczytuję plik ${index + 1} z ${document.files.length}: ${file.originalName}`, 10 + ((index + 1) / document.files.length) * 12);
+      filesToRead.map(async (file, index) => {
+        progress("Odczytywanie dokumentów", `Odczytuję plik ${index + 1} z ${filesToRead.length}: ${file.originalName}`, 10 + ((index + 1) / filesToRead.length) * 12);
         const text = await extractPlainText(file.storagePath, file.mimeType, file.originalName);
         if (!text) return "";
         return `Plik ${file.originalName}:\n${text.slice(0, perFileTextLimit)}`;
@@ -93,7 +101,7 @@ export async function generateDocumentForUser(input: {
     child: document.child,
     documentType: document.type,
     specialistNotes: document.specialistNotes,
-    uploadedFiles: document.files,
+    uploadedFiles: sourceFiles,
     sourceTexts,
     template,
     similarExamples,
@@ -152,7 +160,7 @@ export async function generateDocumentForUser(input: {
     action: "generate-from-sources",
     entity: "Document",
     entityId: documentId,
-    metadata: { files: document.files.length, templateId: template.id }
+    metadata: { files: sourceFiles.length, templateId: template.id }
   });
 
   progress("Gotowe", "Dokument został wygenerowany i jest gotowy do weryfikacji.", 100);

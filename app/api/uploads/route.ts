@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { writeAuditLog } from "@/lib/audit";
 import { fileHasExtension } from "@/lib/document-knowledge";
+import { materializeOcrTextAttachment } from "@/lib/ocr-attachments";
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const allowedMimeTypes = new Set([
@@ -52,6 +53,17 @@ export async function POST(request: Request) {
     }
   });
 
+  const ocrFile = await materializeOcrTextAttachment(uploadedFile);
+
   await writeAuditLog({ userId: user.id, action: "upload", entity: "UploadedFile", entityId: uploadedFile.id });
-  return NextResponse.json(uploadedFile, { status: 201 });
+  if (ocrFile) {
+    await writeAuditLog({
+      userId: user.id,
+      action: "create-ocr-upload",
+      entity: "UploadedFile",
+      entityId: ocrFile.id,
+      metadata: { sourceFileId: uploadedFile.id }
+    });
+  }
+  return NextResponse.json({ ...uploadedFile, relatedFiles: ocrFile ? [ocrFile] : [] }, { status: 201 });
 }
