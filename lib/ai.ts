@@ -178,7 +178,7 @@ async function generateFieldsWithOnlineAgent(
       }
     }
 
-    const content = normalizeMissingKsField(section, generated, input);
+    const content = normalizeMissingStructuredField(section, generated, input);
     output[section.title] = content;
     if (section.fieldId) output[section.fieldId] = content;
     completedFields += 1;
@@ -303,7 +303,7 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
         if (section.fieldId) output[section.fieldId] = output[section.title];
       } else {
         const data = (await response.json()) as { answer?: string };
-        const content = normalizeMissingKsField(section, sanitizeFieldAnswer(data.answer, input.sourceTexts, Object.values(output)), input);
+        const content = normalizeMissingStructuredField(section, sanitizeFieldAnswer(data.answer, input.sourceTexts, Object.values(output)), input);
         output[section.title] = content;
         if (section.fieldId) output[section.fieldId] = content;
       }
@@ -747,15 +747,18 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
     .join("\n");
 }
 
-function normalizeMissingKsField(section: TemplateSection, generated: string, input: GenerationInput) {
+function normalizeMissingStructuredField(section: TemplateSection, generated: string, input: GenerationInput) {
   const content = generated || "Brak danych w załączonych materiałach.";
-  if (!isMissingAnswer(content) || !isKsAnswerableField(section) || !input.sourceTexts?.join("").trim()) return content;
-  return buildKsFieldFallback(section, input);
+  if (!isMissingAnswer(content) || !isAnswerableStructuredField(section) || !input.sourceTexts?.join("").trim()) return content;
+  return buildStructuredFieldFallback(section, input);
 }
 
-function isKsAnswerableField(section: TemplateSection) {
+function isAnswerableStructuredField(section: TemplateSection) {
   const key = normalizeForCopyCheck([section.fieldId, section.instruction, section.title].filter(Boolean).join(" "));
   return (
+    key.includes("ks mocne strony") ||
+    key.includes("mocne strony") ||
+    key.includes("uzdolnienia dziecka") ||
     key.includes("ks potrzeby mozliwosci") ||
     key.includes("indywidualne potrzeby") ||
     key.includes("ks biezaca praca") ||
@@ -767,22 +770,59 @@ function isKsAnswerableField(section: TemplateSection) {
     key.includes("ks pomoc psychologiczno pedagogiczna") ||
     key.includes("pomocy psychologiczno pedagogicznej") ||
     key.includes("ks sprzet i pomoce") ||
-    key.includes("sprzet specjalistyczny")
+    key.includes("sprzet specjalistyczny") ||
+    key.includes("diagnoza potencjal") ||
+    key.includes("diagnoza zasoby") ||
+    key.includes("diagnoza bariery") ||
+    key.includes("zalecenia wsparcie") ||
+    key.includes("zalecenia przejscie szkolne") ||
+    key.includes("zalecenia wzmacnianie zasobow") ||
+    key.includes("zalecenia wwr") ||
+    key.includes("zalecenia przedszkole") ||
+    key.includes("zalecenia inne") ||
+    key.includes("mozliwosci psychofizycz") ||
+    key.includes("potencjal rozwoj") ||
+    key.includes("zasoby w srodowisku") ||
+    key.includes("bariery i ograniczenia") ||
+    key.includes("warunki i formy wsparcia") ||
+    key.includes("wzmacniania zasobow") ||
+    key.includes("usuwania barier")
   );
 }
 
-function buildKsFieldFallback(section: TemplateSection, input: GenerationInput) {
-  const facts = selectKsFallbackFacts(section, input);
+function buildStructuredFieldFallback(section: TemplateSection, input: GenerationInput) {
+  const facts = selectStructuredFallbackFacts(section, input);
   const childName = `${input.child.firstName} ${input.child.lastName}`.trim();
   const key = normalizeForCopyCheck([section.fieldId, section.instruction, section.title].filter(Boolean).join(" "));
   const basis = facts.length
     ? facts.join(" ")
     : "W opisie funkcjonowania dziecka wskazano trudności rozwojowe i edukacyjne oraz potrzebę systematycznego wsparcia.";
 
+  if (key.includes("mocne strony") || key.includes("uzdolnienia dziecka") || key.includes("diagnoza potencjal") || key.includes("potencjal rozwoj")) {
+    return [
+      `Na podstawie załączonych materiałów można wskazać, że ${childName} posiada zasoby, które należy wykorzystywać w dalszej pracy edukacyjnej i terapeutycznej. ${basis}`,
+      "Do mocnych stron dziecka należy zaliczyć obszary, w których przy odpowiednim wsparciu podejmuje aktywność, korzysta z pomocy dorosłego, rozwija nabywane umiejętności oraz wykazuje potencjał do dalszego usprawniania funkcjonowania poznawczego, komunikacyjnego, ruchowego i społeczno-emocjonalnego. Mocne strony powinny być wzmacniane przez częste pozytywne informacje zwrotne, zadania dostosowane do możliwości dziecka oraz wykorzystywanie zainteresowań i aktywności, które zwiększają jego motywację."
+    ].join("\n\n");
+  }
+
   if (key.includes("indywidualne potrzeby") || key.includes("ks potrzeby mozliwosci")) {
     return [
       `Z opisu funkcjonowania dziecka wynika, że ${childName} wymaga dostosowania oddziaływań edukacyjnych i terapeutycznych do aktualnych możliwości psychofizycznych, w szczególności w zakresie koncentracji uwagi, komunikacji, funkcji poznawczych, motorycznych oraz samodzielnego wykonywania zadań. ${basis}`,
       `Potrzeby rozwojowe i edukacyjne obejmują stałe wzmacnianie mocnych stron, pracę w czytelnej strukturze, dzielenie zadań na krótsze etapy, utrwalanie nabywanych umiejętności oraz udzielanie wsparcia w obszarach, w których trudności ograniczają samodzielność i efektywność uczenia się. Możliwości dziecka należy oceniać z uwzględnieniem zarówno rozpoznanych ograniczeń, jak i potencjału widocznego w sytuacjach, w których otrzymuje ono adekwatne wsparcie.`
+    ].join("\n\n");
+  }
+
+  if (key.includes("diagnoza zasoby") || key.includes("zasoby w srodowisku")) {
+    return [
+      `Zasobem w środowisku opieki, wychowania i nauczania jest możliwość organizowania systematycznego wsparcia dostosowanego do potrzeb ${childName}. ${basis}`,
+      "W pracy z dzieckiem należy wykorzystywać współpracę rodziców, nauczycieli i specjalistów, stałą wymianę informacji o funkcjonowaniu dziecka oraz spójność oddziaływań w domu, placówce i podczas terapii. Istotnym zasobem jest także możliwość wzmacniania mocnych stron dziecka w codziennych sytuacjach edukacyjnych i wychowawczych."
+    ].join("\n\n");
+  }
+
+  if (key.includes("diagnoza bariery") || key.includes("bariery i ograniczenia")) {
+    return [
+      `Bariery wpływające na funkcjonowanie dziecka wynikają z opisanych w źródłach trudności rozwojowych, edukacyjnych i funkcjonalnych. ${basis}`,
+      "Ograniczenia te mogą utrudniać samodzielne wykonywanie zadań, utrzymanie uwagi, komunikowanie potrzeb, korzystanie z materiału dydaktycznego oraz pełne uczestnictwo w aktywnościach grupowych. Wymagają one stałego dostosowania warunków pracy, tempa, sposobu formułowania poleceń oraz rodzaju udzielanego wsparcia."
     ].join("\n\n");
   }
 
@@ -815,13 +855,28 @@ function buildKsFieldFallback(section: TemplateSection, input: GenerationInput) 
     ].join("\n");
   }
 
+  if (
+    key.includes("zalecenia") ||
+    key.includes("warunki i formy wsparcia") ||
+    key.includes("wzmacniania zasobow") ||
+    key.includes("usuwania barier")
+  ) {
+    return [
+      "- dostosować wymagania, tempo pracy i sposób przekazywania poleceń do aktualnych możliwości dziecka;",
+      "- dzielić zadania na krótsze etapy, stosować powtarzalną strukturę pracy oraz częste wzmacnianie pozytywne;",
+      "- systematycznie rozwijać obszary wskazane w diagnozie jako wymagające wsparcia, z jednoczesnym wykorzystywaniem mocnych stron dziecka;",
+      "- zapewnić współpracę rodziców, nauczycieli i specjalistów oraz regularną wymianę informacji o postępach dziecka;",
+      "- monitorować skuteczność oddziaływań i modyfikować zakres wsparcia zgodnie z aktualnym funkcjonowaniem dziecka."
+    ].join("\n");
+  }
+
   return [
     `Na podstawie opisu funkcjonowania ${childName} należy zaplanować wsparcie adekwatne do rozpoznanych trudności i mocnych stron dziecka.`,
     basis
   ].join("\n\n");
 }
 
-function selectKsFallbackFacts(section: TemplateSection, input: GenerationInput) {
+function selectStructuredFallbackFacts(section: TemplateSection, input: GenerationInput) {
   const text = [input.childProfile, ...(input.sourceTexts ?? [])].filter(Boolean).join("\n");
   const normalizedQuestion = normalizeForCopyCheck([section.fieldId, section.instruction, section.title].filter(Boolean).join(" "));
   const baseTerms = ["trudno", "diagno", "mowa", "koncentr", "uwag", "pamiec", "motory", "grafomot", "percepc", "koordyn", "emoc", "spolecz", "komunik", "afaz", "terap", "mocn"];
@@ -1006,6 +1061,14 @@ function detailedWwrInstruction(section: TemplateSection) {
       "Opisz indywidualne potrzeby rozwojowe i edukacyjne oraz możliwości psychofizyczne dziecka. Wyprowadź je z rozpoznanych trudności, mocnych stron, diagnoz, obserwacji i wyników badań źródłowych.",
       "Nie wymagaj, aby w źródłach występowało dosłowne sformułowanie z pytania. Jeżeli źródła opisują trudności, mocne strony, koncentrację, mowę, funkcjonowanie poznawcze, emocjonalne, społeczne, motoryczne lub edukacyjne, oznacza to, że są dane do tego pola.",
       "Uwzględnij zarówno potrzeby wsparcia, jak i realne możliwości dziecka. Nie wpisuj 'Brak danych w załączonych materiałach.', jeśli w źródłach występują jakiekolwiek informacje diagnostyczne o funkcjonowaniu dziecka."
+    ].join("\n");
+  }
+  if (normalized.includes("mocne strony") || normalized.includes("uzdolnienia dziecka") || normalized.includes("potencjal rozwoj")) {
+    return [
+      "Instrukcja szczegółowa dla pola dotyczącego mocnych stron i potencjału:",
+      "Opisz mocne strony, zasoby, uzdolnienia i potencjał dziecka wynikające z całego materiału źródłowego. Nie ograniczaj się do dosłownych fraz 'mocne strony' w dokumentach.",
+      "Mocne strony można wywnioskować z opisanych zachowań, podejmowanych aktywności, przebiegu terapii, obszarów lepszego funkcjonowania, reakcji na wsparcie, zainteresowań, zachowanej sprawności oraz możliwości rozwojowych.",
+      "Nie wpisuj 'Brak danych w załączonych materiałach.', jeśli źródła zawierają jakikolwiek opis funkcjonowania dziecka, jego aktywności, postępów, zasobów lub reakcji na pomoc."
     ].join("\n");
   }
   if (normalized.includes("dzialan podczas biezacej pracy") || normalized.includes("pracyzdzieckiem") || normalized.includes("wspolpracy z rodzicami")) {
