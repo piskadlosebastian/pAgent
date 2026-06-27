@@ -1,5 +1,6 @@
 import AdmZip from "adm-zip";
-import { mkdir, writeFile } from "node:fs/promises";
+import JSZip from "jszip";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { DocumentTemplate } from "../generated/prisma/client";
 import { asTemplateSections, extractDocxTemplateSections, fileHasExtension, isTextMarker, repairGluedPolishTextPreservingLayout, type TemplateSection } from "./document-knowledge";
@@ -26,18 +27,43 @@ export async function buildDocxFromTemplate(input: GeneratedDocxInput) {
   if (!sections.some((section) => section.marker === "TEKST")) {
     sections = extractDocxTemplateSections(docxTemplatePath);
   }
-  const zip = new AdmZip(docxTemplatePath);
-  const documentEntry = zip.getEntry("word/document.xml");
+  const zip = await JSZip.loadAsync(await readFile(docxTemplatePath));
+  const documentEntry = zip.file("word/document.xml");
   if (!documentEntry) return null;
 
-  const originalXml = documentEntry.getData().toString("utf8");
+  const originalXml = await documentEntry.async("string");
   const filledXml = fillDocumentXml(originalXml, sections, input.aiSections);
-  zip.updateFile("word/document.xml", Buffer.from(filledXml, "utf8"));
+  zip.file("word/document.xml", filledXml);
   const validationErrors = validateGeneratedDocxXml(originalXml, filledXml);
 
   const outputPath = path.join(outputDirectory, `${input.documentId}.docx`);
-  await writeFile(outputPath, zip.toBuffer());
+  const outputBuffer = await zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 }
+  });
+  await writeFile(outputPath, outputBuffer);
+  await assertReadableDocx(outputBuffer);
   return { path: outputPath, validationErrors } satisfies DocxBuildResult;
+}
+
+export async function isReadableDocxBuffer(buffer: Buffer | Uint8Array) {
+  try {
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = await zip.file("word/document.xml")?.async("string");
+    if (!documentXml?.includes("<w:document")) return false;
+
+    const strictZip = new AdmZip(Buffer.from(buffer));
+    const strictDocumentXml = strictZip.getEntry("word/document.xml")?.getData().toString("utf8");
+    return Boolean(strictDocumentXml?.includes("<w:document"));
+  } catch {
+    return false;
+  }
+}
+
+async function assertReadableDocx(buffer: Buffer) {
+  if (await isReadableDocxBuffer(buffer)) return;
+  throw new Error("Wygenerowany DOCX nie zawiera czytelnego word/document.xml.");
 }
 
 async function resolveDocxTemplatePath(template: Pick<DocumentTemplate, "storagePath" | "mimeType" | "originalName">, outputDirectory: string) {

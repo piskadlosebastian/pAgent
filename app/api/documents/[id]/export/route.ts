@@ -5,7 +5,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { buildOpinionDocx } from "@/lib/docx";
-import { buildDocxFromTemplate } from "@/lib/docx-template";
+import { buildDocxFromTemplate, isReadableDocxBuffer } from "@/lib/docx-template";
 import { writeAuditLog } from "@/lib/audit";
 
 type ExportDocument = Prisma.DocumentGetPayload<{ include: { child: true; template: true } }>;
@@ -62,7 +62,13 @@ async function getTemplateBasedDocx(document: ExportDocument) {
   const generatedDocxPath = getGeneratedDocxPath(document.validationReport);
   if (generatedDocxPath) {
     const existingBuffer = await readFile(generatedDocxPath).catch(() => null);
-    if (existingBuffer) return existingBuffer;
+    if (existingBuffer && await isReadableDocxBuffer(existingBuffer)) return existingBuffer;
+    if (existingBuffer) {
+      console.warn("[DOCX_EXPORT] Existing generated DOCX is unreadable, rebuilding", {
+        documentId: document.id,
+        generatedDocxPath
+      });
+    }
   }
 
   const aiSections = getAiSections(document.validationReport);
