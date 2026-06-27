@@ -191,8 +191,9 @@ export default function DocumentsPage() {
       <section className="panel documents-list-panel">
         <div className="toolbar documents-toolbar">
           <div className="page-title">
-            <h1>Dokumenty</h1>
-            <p>Lista opinii z filtrowaniem po statusie i czytelnym podglądem treści.</p>
+            <span className="premium-kicker">Historia pracy</span>
+            <h1>Historia dokumentów</h1>
+            <p>Wszystkie wygenerowane opinie, załączniki źródłowe i decyzje jakości w jednym spokojnym widoku.</p>
           </div>
           <select className="select documents-filter" value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Status">
             {statuses.map(([value, label]) => (

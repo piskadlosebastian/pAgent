@@ -21,8 +21,9 @@ export default async function DashboardPage() {
     <div className="grid">
       <section className="panel hero-panel">
         <div className="page-title">
-          <h1>Witaj w pAgent</h1>
-          <p>Pracuj spokojnie z dokumentami PPP, bazą dzieci i projektami opinii w jednym bezpiecznym, uporządkowanym miejscu.</p>
+          <span className="premium-kicker">pAgent</span>
+          <h1>Twórz opinie PPP spokojniej.</h1>
+          <p>Premium workspace dla dokumentów KS, WWR i opinii PPP. W centrum jest kreator, wzór dokumentu i bezpieczna weryfikacja treści.</p>
           <div className="hero-actions">
             <Link className="button accent" href="/new-opinion">
               <Sparkles size={18} aria-hidden />
@@ -70,37 +71,22 @@ export default async function DashboardPage() {
             Wszystkie dokumenty
           </Link>
         </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Tytul</th>
-              <th>Dziecko</th>
-              <th>Status</th>
-              <th>Data</th>
-            </tr>
-          </thead>
-          <tbody>
-            {latestDocuments.map((document) => (
-              <tr key={document.id}>
-                <td>{document.title}</td>
-                <td>
-                  {document.child.firstName} {document.child.lastName}
-                </td>
-                <td>
-                  <span className={`badge status-${document.status}`}>{document.status}</span>
-                </td>
-                <td>{document.createdAt.toLocaleDateString("pl-PL")}</td>
-              </tr>
-            ))}
-            {!latestDocuments.length ? (
-              <tr>
-                <td colSpan={4} className="muted">
-                  Brak dokumentów. Zacznij od utworzenia pierwszej opinii.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <div className="premium-card-list">
+          {latestDocuments.map((document) => (
+            <article className="premium-list-card" key={document.id}>
+              <div>
+                <strong>{document.title}</strong>
+                <p>
+                  {document.child.firstName} {document.child.lastName} · {document.createdAt.toLocaleDateString("pl-PL")}
+                </p>
+              </div>
+              <span className={`badge status-${document.status}`}>{document.status}</span>
+            </article>
+          ))}
+          {!latestDocuments.length ? (
+            <p className="muted">Brak dokumentów. Zacznij od utworzenia pierwszej opinii.</p>
+          ) : null}
+        </div>
       </section>
     </div>
   );

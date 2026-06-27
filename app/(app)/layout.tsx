@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { AppLogo } from "@/components/AppLogo";
 import { BottomNav } from "@/components/BottomNav";
+import { SidebarNav } from "@/components/SidebarNav";
 import { SignOutButton } from "@/components/SignOutButton";
 import { authOptions } from "@/lib/auth";
-import { BookOpenCheck, FileStack, FileText, Home, Settings, Sparkles, Users } from "lucide-react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
@@ -15,46 +15,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <main className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <AppLogo />
-        </div>
-        <nav className="sidebar-nav">
-          <Link href="/dashboard" className="sidebar-item">
-            <Home size={20} aria-hidden />
-            <span>Dashboard</span>
-          </Link>
-          <Link href="/children" className="sidebar-item">
-            <Users size={20} aria-hidden />
-            <span>Dzieci</span>
-          </Link>
-          <Link href="/documents" className="sidebar-item">
-            <FileText size={20} aria-hidden />
-            <span>Dokumenty</span>
-          </Link>
-          <Link href="/templates" className="sidebar-item">
-            <FileStack size={20} aria-hidden />
-            <span>Wzory dokumentów</span>
-          </Link>
-          <Link href="/examples" className="sidebar-item">
-            <BookOpenCheck size={20} aria-hidden />
-            <span>Przykłady wzorcowe</span>
-          </Link>
-          <Link href="/new-opinion" className="sidebar-item">
-            <Sparkles size={20} aria-hidden />
-            <span>Nowa opinia</span>
-          </Link>
-        </nav>
-        <div className="sidebar-footer">
-          <Link href="/settings" className="sidebar-item">
-            <Settings size={20} aria-hidden />
-            <span>Ustawienia</span>
+          <Link href="/dashboard" aria-label="pAgent - strona główna">
+            <AppLogo compact />
           </Link>
         </div>
+        <SidebarNav />
       </aside>
 
       <header className="topbar">
         <div className="topbar-title">
           <div>
-            <p>Bezpieczne przygotowywanie projektów opinii PPP</p>
+            <p>Spokojne przygotowywanie opinii PPP na podstawie wzorów i dokumentów źródłowych.</p>
           </div>
         </div>
         <SignOutButton />

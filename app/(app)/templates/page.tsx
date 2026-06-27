@@ -65,6 +65,7 @@ export default function TemplatesPage() {
     <div className="grid">
       <section className="panel">
         <div className="page-title">
+          <span className="premium-kicker">Biblioteka wzorów</span>
           <h1>Wzory dokumentów</h1>
           <p>Aktywny wzór jest nadrzędny wobec AI. Generator zachowuje jego sekcje i wypełnia tylko brakującą treść.</p>
         </div>
@@ -107,37 +108,27 @@ export default function TemplatesPage() {
             <h2>Wersje wzorów</h2>
             <span className="badge">{templates.length}</span>
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Nazwa</th>
-                  <th>Typ</th>
-                  <th>Wersja</th>
-                  <th>Status</th>
-                  <th>Sekcje</th>
-                  <th>Akcja</th>
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((template) => (
-                  <tr key={template.id}>
-                    <td>{template.name}</td>
-                    <td>{types.find(([value]) => value === template.type)?.[1]}</td>
-                    <td>{template.version}</td>
-                    <td><span className={`badge ${template.status === "ACTIVE" ? "status-APPROVED" : "status-ARCHIVED"}`}>{template.status === "ACTIVE" ? "Aktywny" : "Archiwalny"}</span></td>
-                    <td>{template.sections?.length ?? 0}</td>
-                    <td>
-                      <button className="button secondary" type="button" onClick={() => activate(template.id)} disabled={template.status === "ACTIVE"}>
-                        <CheckCircle2 size={16} aria-hidden />
-                        Aktywuj
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {!templates.length ? <tr><td colSpan={6} className="muted">Brak wzorów dokumentów.</td></tr> : null}
-              </tbody>
-            </table>
+          <div className="premium-card-list">
+            {templates.map((template) => (
+              <article className="premium-list-card" key={template.id}>
+                <div>
+                  <strong>{template.name}</strong>
+                  <p>
+                    {types.find(([value]) => value === template.type)?.[1]} · wersja {template.version} · {template.sections?.length ?? 0} sekcji
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                  <span className={`badge ${template.status === "ACTIVE" ? "status-APPROVED" : "status-ARCHIVED"}`}>
+                    {template.status === "ACTIVE" ? "Aktywny" : "Archiwalny"}
+                  </span>
+                  <button className="button secondary" type="button" onClick={() => activate(template.id)} disabled={template.status === "ACTIVE"}>
+                    <CheckCircle2 size={16} aria-hidden />
+                    Aktywuj
+                  </button>
+                </div>
+              </article>
+            ))}
+            {!templates.length ? <p className="muted">Brak wzorów dokumentów.</p> : null}
           </div>
         </section>
       </div>

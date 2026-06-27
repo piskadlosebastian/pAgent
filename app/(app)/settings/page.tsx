@@ -243,8 +243,9 @@ export default function SettingsPage() {
         <section className="panel">
           <div className="toolbar">
             <div className="page-title">
+              <span className="premium-kicker">Zespół</span>
               <h1>Użytkownicy</h1>
-              <p>Panel administracyjny dostępny tylko dla konta admin@nexurio.pl.</p>
+              <p>Zarządzanie dostępem do pAgent dla osób pracujących nad opiniami.</p>
             </div>
             <span className="stat-icon">
               <UserCog size={22} aria-hidden />

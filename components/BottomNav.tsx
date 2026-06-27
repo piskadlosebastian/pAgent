@@ -6,11 +6,11 @@ import { FileStack, FileText, Home, Settings, Sparkles, Users } from "lucide-rea
 import clsx from "clsx";
 
 const items = [
-  { href: "/dashboard", label: "Dashboard", icon: Home },
+  { href: "/dashboard", label: "Start", icon: Home },
   { href: "/children", label: "Dzieci", icon: Users },
-  { href: "/documents", label: "Dokumenty", icon: FileText },
+  { href: "/new-opinion", label: "Utwórz", icon: Sparkles },
   { href: "/templates", label: "Wzory", icon: FileStack },
-  { href: "/new-opinion", label: "Nowa opinia", icon: Sparkles },
+  { href: "/documents", label: "Historia", icon: FileText },
   { href: "/settings", label: "Ustawienia", icon: Settings }
 ];
 

@@ -111,7 +111,7 @@ export default function NewOpinionPage() {
   const canSaveDraft = childMode === "new"
     ? Boolean(newChild.firstName.trim() && newChild.lastName.trim() && newChild.birthDate)
     : Boolean(childId);
-  const currentStepIndex = step === "child" ? 0 : step === "files" ? 1 : 2;
+  const currentStepIndex = step === "child" ? 0 : step === "files" ? 1 : step === "preview" ? 4 : 0;
   const selectedDocumentType = documentTypes.find((item) => item.value === documentType) ?? documentTypes[0];
 
   async function saveDraft() {
@@ -291,12 +291,13 @@ export default function NewOpinionPage() {
 
       <section className="panel">
         <div className="page-title">
-          <h1>Nowa opinia</h1>
-          <p>Utwórz dokument w trzech krokach: dziecko, pliki źródłowe, podgląd i pobranie opinii.</p>
+          <span className="premium-kicker">Centralny kreator</span>
+          <h1>Utwórz nową opinię</h1>
+          <p>Spokojny proces od danych dziecka po gotowy DOCX. Aplikacja prowadzi Cię przez dokumenty, wzór, generowanie i weryfikację.</p>
         </div>
         <div className="stepper" aria-label="Kroki tworzenia opinii">
-          {["Dziecko", "Pliki", "Podgląd"].map((label, index) => (
-            <div className={`step ${index === currentStepIndex ? "active" : ""}`} key={label}>
+          {["Dziecko", "Dokumenty", "Wzór", "Generowanie", "Weryfikacja"].map((label, index) => (
+            <div className={`step ${index === currentStepIndex ? "active" : ""} ${index < currentStepIndex ? "done" : ""}`} key={label}>
               <span className="step-number">{index + 1}</span>
               <span>{label}</span>
             </div>
@@ -488,6 +489,13 @@ export default function NewOpinionPage() {
 
 function GenerationOverlay({ progress }: { progress: GenerationProgress }) {
   const percent = Math.max(0, Math.min(100, Math.round(progress.percent)));
+  const steps = [
+    { label: "Analiza dokumentów", threshold: 10 },
+    { label: "Tworzenie profilu dziecka", threshold: 28 },
+    { label: "Wypełnianie wzoru", threshold: 40 },
+    { label: "Kontrola jakości", threshold: 84 },
+    { label: "Przygotowanie DOCX", threshold: 92 }
+  ];
   return (
     <div className="generation-overlay" role="status" aria-live="polite">
       <div className="generation-card">
@@ -501,6 +509,17 @@ function GenerationOverlay({ progress }: { progress: GenerationProgress }) {
         <div className="generation-progress" aria-hidden>
           <span style={{ width: `${Math.max(8, percent)}%` }} />
         </div>
+        <ul className="generation-steps">
+          {steps.map((item) => {
+            const done = percent >= item.threshold + 12;
+            const current = percent >= item.threshold && !done;
+            return (
+              <li className={done ? "done" : current ? "current" : "waiting"} key={item.label}>
+                {done ? "✓" : current ? "⟳" : "○"} {item.label}
+              </li>
+            );
+          })}
+        </ul>
         <p className="muted" style={{ fontSize: "12px", margin: 0 }}>{percent}% wykonania</p>
       </div>
     </div>

@@ -82,8 +82,9 @@ export default function ChildrenPage() {
       <section className="panel">
         <div className="toolbar">
           <div className="page-title">
+            <span className="premium-kicker">Kartoteka</span>
             <h1>Dzieci</h1>
-            <p>Baza podopiecznych wraz z historią utworzonych dokumentów.</p>
+            <p>Delikatnie uporządkowane dane dziecka, gotowe do użycia w kreatorze opinii.</p>
           </div>
           <span className="stat-icon"><UserRound size={22} aria-hidden /></span>
         </div>
