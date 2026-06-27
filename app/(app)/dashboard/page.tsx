@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { CheckCircle2, FileText, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { CheckCircle2, FileText, Sparkles, Users } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 
 export default async function DashboardPage() {
   const user = await requireUser();
+  const displayName = user.name?.trim() || user.email?.split("@")[0] || "";
+  const firstName = displayName.split(/\s+/)[0];
   const [childrenCount, documentsCount, latestDocuments] = await Promise.all([
     prisma.child.count({ where: { userId: user.id } }),
     prisma.document.count({ where: { userId: user.id } }),
@@ -22,7 +24,7 @@ export default async function DashboardPage() {
       <section className="panel hero-panel">
         <div className="page-title">
           <span className="premium-kicker">pAgent</span>
-          <h1>Twórz opinie PPP spokojniej.</h1>
+          <h1>Dzień dobry{firstName ? `, ${firstName}` : ""}</h1>
           <p>Premium workspace dla dokumentów KS, WWR i opinii PPP. W centrum jest kreator, wzór dokumentu i bezpieczna weryfikacja treści.</p>
           <div className="hero-actions">
             <Link className="button accent" href="/new-opinion">

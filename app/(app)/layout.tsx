@@ -23,11 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </aside>
 
       <header className="topbar">
-        <div className="topbar-title">
-          <div>
-            <p>Spokojne przygotowywanie opinii PPP na podstawie wzorów i dokumentów źródłowych.</p>
-          </div>
-        </div>
+        <div className="topbar-title" aria-hidden="true" />
         <SignOutButton />
       </header>
       <section className="content">{children}</section>
