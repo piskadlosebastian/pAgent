@@ -296,7 +296,7 @@ export default function NewOpinionPage() {
           <p>Spokojny proces od danych dziecka po gotowy DOCX. Aplikacja prowadzi Cię przez dokumenty, wzór, generowanie i weryfikację.</p>
         </div>
         <div className="stepper" aria-label="Kroki tworzenia opinii">
-          {["Dziecko", "Dokumenty", "Wzór", "Generowanie", "Weryfikacja"].map((label, index) => (
+          {["Dziecko", "Dokumenty", "Wypełnianie wzoru", "Generowanie", "Weryfikacja"].map((label, index) => (
             <div className={`step ${index === currentStepIndex ? "active" : ""} ${index < currentStepIndex ? "done" : ""}`} key={label}>
               <span className="step-number">{index + 1}</span>
               <span>{label}</span>
