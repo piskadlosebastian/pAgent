@@ -247,7 +247,10 @@ export default function DocumentsPage() {
                 </summary>
                 <ul>
                   {document.files.map((file) => (
-                    <li key={file.id}>{file.originalName}</li>
+                    <li key={file.id}>
+                      <span>{file.originalName}</span>
+                      <a href={`/api/uploads/${file.id}/text`} target="_blank" rel="noreferrer">Podgląd tekstu/OCR</a>
+                    </li>
                   ))}
                   {!document.files.length ? <li className="muted">Brak plików</li> : null}
                 </ul>
@@ -331,7 +334,11 @@ export default function DocumentsPage() {
             <div className="documents-attachments">
               <span className="muted">Załączniki:</span>
               <ul>
-                {selected.files.map((file) => <li key={file.id}>{file.originalName}</li>)}
+                {selected.files.map((file) => (
+                  <li key={file.id}>
+                    {file.originalName} - <a href={`/api/uploads/${file.id}/text`} target="_blank" rel="noreferrer">podgląd tekstu/OCR</a>
+                  </li>
+                ))}
                 {!selected.files.length ? <li className="muted">Brak plików</li> : null}
               </ul>
             </div>

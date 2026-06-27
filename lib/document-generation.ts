@@ -4,6 +4,7 @@ import { getAiAgent } from "@/lib/ai-agents";
 import { buildDocxFromTemplate } from "@/lib/docx-template";
 import { buildKnowledgeQuery, extractPlainText, findSimilarExamples, inferPppType } from "@/lib/document-knowledge";
 import { isOcrSourceFile, materializeDocumentOcrTextAttachments } from "@/lib/ocr-attachments";
+import { saveExtractedText } from "@/lib/extracted-text";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -70,6 +71,7 @@ export async function generateDocumentForUser(input: {
       filesToRead.map(async (file, index) => {
         progress("Odczytywanie dokumentów", `Odczytuję plik ${index + 1} z ${filesToRead.length}: ${file.originalName}`, 10 + ((index + 1) / filesToRead.length) * 12);
         const text = await extractPlainText(file.storagePath, file.mimeType, file.originalName);
+        await saveExtractedText(file, text);
         if (!text) return "";
         return `Plik ${file.originalName}:\n${text.slice(0, perFileTextLimit)}`;
       })

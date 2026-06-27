@@ -758,6 +758,10 @@ h2 {
 }
 
 .document-row-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
   overflow-wrap: anywhere;
   padding: 7px 10px;
@@ -768,6 +772,18 @@ h2 {
   font-size: 12px;
   font-weight: 650;
   line-height: 1.35;
+}
+
+.document-row-files li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.document-row-files li a,
+.documents-attachments a {
+  color: var(--primary);
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .documents-empty {
