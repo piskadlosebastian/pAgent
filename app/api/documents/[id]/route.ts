@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import { documentSchema } from "@/lib/validators";
 import { writeAuditLog } from "@/lib/audit";
 import { validateAgainstTemplate } from "@/lib/document-knowledge";
+import { removeDocumentArtifacts } from "@/lib/storage-cleanup";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -45,10 +46,15 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await context.params;
-  const existing = await prisma.document.findFirst({ where: { id, userId: user.id } });
+  const existing = await prisma.document.findFirst({ where: { id, userId: user.id }, include: { files: true } });
   if (!existing) return NextResponse.json({ error: "Nie znaleziono dokumentu." }, { status: 404 });
 
   await prisma.document.delete({ where: { id } });
+  await removeDocumentArtifacts({
+    documentId: id,
+    files: existing.files,
+    validationReport: existing.validationReport
+  });
   await writeAuditLog({ userId: user.id, action: "delete", entity: "Document", entityId: id });
   return NextResponse.json({ ok: true });
 }

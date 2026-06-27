@@ -1,4 +1,5 @@
 ﻿import type { Prisma } from "@/generated/prisma/client";
+import path from "node:path";
 import { generateOpinionDraft, type GenerationProgressEvent } from "@/lib/ai";
 import { getAiAgent } from "@/lib/ai-agents";
 import { buildDocxFromTemplate } from "@/lib/docx-template";
@@ -7,6 +8,7 @@ import { isOcrSourceFile, materializeDocumentOcrTextAttachments } from "@/lib/oc
 import { saveExtractedText } from "@/lib/extracted-text";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
+import { removeGeneratedDocxFromReport } from "@/lib/storage-cleanup";
 
 type GenerationUser = {
   id: string;
@@ -112,6 +114,7 @@ export async function generateDocumentForUser(input: {
   });
 
   progress("Składanie dokumentu", "Wstawiam wygenerowane treści do wzoru DOCX.", 84);
+  await removeGeneratedDocxFromReport(document.validationReport, generatedExpectedDocxPath(documentId));
   const generatedDocx = generated.aiSections
     ? await buildDocxFromTemplate({
         documentId,
@@ -167,6 +170,10 @@ export async function generateDocumentForUser(input: {
 
   progress("Gotowe", "Dokument został wygenerowany i jest gotowy do weryfikacji.", 100);
   return updated;
+}
+
+function generatedExpectedDocxPath(documentId: string) {
+  return path.join(process.cwd(), "storage", "generated", `${documentId}.docx`);
 }
 
 function progressFromAiEvent(

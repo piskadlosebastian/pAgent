@@ -1,8 +1,8 @@
-import { unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { writeAuditLog } from "@/lib/audit";
+import { removeUploadedFileArtifacts } from "@/lib/storage-cleanup";
 
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -19,12 +19,12 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
 
   if (ocrFile) {
     await prisma.uploadedFile.delete({ where: { id: ocrFile.id } });
-    await unlink(ocrFile.storagePath).catch(() => undefined);
+    await removeUploadedFileArtifacts(ocrFile);
     await writeAuditLog({ userId: user.id, action: "delete-ocr-upload", entity: "UploadedFile", entityId: ocrFile.id });
   }
 
   await prisma.uploadedFile.delete({ where: { id } });
-  await unlink(file.storagePath).catch(() => undefined);
+  await removeUploadedFileArtifacts(file);
   await writeAuditLog({ userId: user.id, action: "delete-upload", entity: "UploadedFile", entityId: id });
 
   return NextResponse.json({ ok: true });
