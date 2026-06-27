@@ -178,7 +178,7 @@ async function generateFieldsWithOnlineAgent(
       }
     }
 
-    const content = generated || "Brak danych w załączonych materiałach.";
+    const content = normalizeMissingKsField(section, generated, input);
     output[section.title] = content;
     if (section.fieldId) output[section.fieldId] = content;
     completedFields += 1;
@@ -303,7 +303,7 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
         if (section.fieldId) output[section.fieldId] = output[section.title];
       } else {
         const data = (await response.json()) as { answer?: string };
-        const content = sanitizeFieldAnswer(data.answer, input.sourceTexts, Object.values(output));
+        const content = normalizeMissingKsField(section, sanitizeFieldAnswer(data.answer, input.sourceTexts, Object.values(output)), input);
         output[section.title] = content;
         if (section.fieldId) output[section.fieldId] = content;
       }
@@ -675,6 +675,7 @@ function buildFallbackChildProfile(input: GenerationInput) {
 function buildFieldPrompt(input: GenerationInput, section: TemplateSection, previousFields: Record<string, string> = {}) {
   const relevantSources = selectRelevantSourceFragments(section, input.sourceTexts);
   const fieldKind = classifyWwrField(section);
+  const isKsDocument = normalizeForCopyCheck(input.documentType || "").includes("ks") || normalizeForCopyCheck(section.fieldId || "").startsWith("ks ");
   return [
     `Typ dokumentu: ${input.documentType || "WWR"}.`,
     input.template ? `Aktywny wzór: ${input.template.name}, wersja ${input.template.version}` : "",
@@ -710,6 +711,7 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
     "",
     "Zadanie:",
     "Wygeneruj rozbudowaną odpowiedź wyłącznie dla tego jednego pola wzoru. Odpowiedź musi być formalna, rzeczowa i oparta na źródłach. Nie streszczaj nadmiernie. Uwzględnij wszystkie istotne informacje odnoszące się do pytania. Jeżeli pytanie dotyczy diagnozy, nie twórz zaleceń. Jeżeli pytanie dotyczy zaleceń, formułuj konkretne formy wsparcia. Nie kopiuj całych źródeł. Nie powtarzaj gotowych akapitów z innych pól.",
+    isKsDocument ? "W dokumencie KS wolno formułować potrzeby i zalecenia przez wnioskowanie z opisanych trudności, diagnoz, mocnych stron, obserwacji i wyników badań. Nie wymagaj dosłownego brzmienia punktu w materiałach źródłowych." : "",
     "",
     "Wymagana objętość:",
     fieldKind === "diagnosis"
@@ -743,6 +745,97 @@ function buildFieldPrompt(input: GenerationInput, section: TemplateSection, prev
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function normalizeMissingKsField(section: TemplateSection, generated: string, input: GenerationInput) {
+  const content = generated || "Brak danych w załączonych materiałach.";
+  if (!isMissingAnswer(content) || !isKsAnswerableField(section) || !input.sourceTexts?.join("").trim()) return content;
+  return buildKsFieldFallback(section, input);
+}
+
+function isKsAnswerableField(section: TemplateSection) {
+  const key = normalizeForCopyCheck([section.fieldId, section.instruction, section.title].filter(Boolean).join(" "));
+  return (
+    key.includes("ks potrzeby mozliwosci") ||
+    key.includes("indywidualne potrzeby") ||
+    key.includes("ks biezaca praca") ||
+    key.includes("dzialan podczas biezacej pracy") ||
+    key.includes("ks zintegrowane dzialania") ||
+    key.includes("zintegrowanych dzialan") ||
+    key.includes("ks zajecia specjalistyczne") ||
+    key.includes("zajec rewalidacyjnych") ||
+    key.includes("ks pomoc psychologiczno pedagogiczna") ||
+    key.includes("pomocy psychologiczno pedagogicznej") ||
+    key.includes("ks sprzet i pomoce") ||
+    key.includes("sprzet specjalistyczny")
+  );
+}
+
+function buildKsFieldFallback(section: TemplateSection, input: GenerationInput) {
+  const facts = selectKsFallbackFacts(section, input);
+  const childName = `${input.child.firstName} ${input.child.lastName}`.trim();
+  const key = normalizeForCopyCheck([section.fieldId, section.instruction, section.title].filter(Boolean).join(" "));
+  const basis = facts.length
+    ? facts.join(" ")
+    : "W opisie funkcjonowania dziecka wskazano trudności rozwojowe i edukacyjne oraz potrzebę systematycznego wsparcia.";
+
+  if (key.includes("indywidualne potrzeby") || key.includes("ks potrzeby mozliwosci")) {
+    return [
+      `Z opisu funkcjonowania dziecka wynika, że ${childName} wymaga dostosowania oddziaływań edukacyjnych i terapeutycznych do aktualnych możliwości psychofizycznych, w szczególności w zakresie koncentracji uwagi, komunikacji, funkcji poznawczych, motorycznych oraz samodzielnego wykonywania zadań. ${basis}`,
+      `Potrzeby rozwojowe i edukacyjne obejmują stałe wzmacnianie mocnych stron, pracę w czytelnej strukturze, dzielenie zadań na krótsze etapy, utrwalanie nabywanych umiejętności oraz udzielanie wsparcia w obszarach, w których trudności ograniczają samodzielność i efektywność uczenia się. Możliwości dziecka należy oceniać z uwzględnieniem zarówno rozpoznanych ograniczeń, jak i potencjału widocznego w sytuacjach, w których otrzymuje ono adekwatne wsparcie.`
+    ].join("\n\n");
+  }
+
+  if (key.includes("dzialan podczas biezacej pracy") || key.includes("ks biezaca praca")) {
+    return [
+      "- stosować krótkie, jednoznaczne polecenia oraz upewniać się, że dziecko rozumie zadanie;",
+      "- dzielić aktywności na mniejsze etapy i umożliwiać częste utrwalanie materiału;",
+      "- zapewniać spokojne warunki pracy, przewidywalną strukturę zajęć oraz przerwy ruchowe adekwatne do potrzeb dziecka;",
+      "- wzmacniać mocne strony dziecka i wykorzystywać je do budowania motywacji oraz poczucia sprawczości;",
+      "- prowadzić bieżącą współpracę z rodzicami w zakresie utrwalania ćwiczonych umiejętności i wymiany informacji o funkcjonowaniu dziecka."
+    ].join("\n");
+  }
+
+  if (key.includes("zintegrowanych dzialan") || key.includes("ks zintegrowane dzialania")) {
+    return [
+      "- zaplanować spójne oddziaływania nauczycieli i specjalistów zgodne z rozpoznanymi potrzebami dziecka;",
+      "- koordynować działania edukacyjne, terapeutyczne i wychowawcze, tak aby cele pracy były wzajemnie uzupełniające;",
+      "- regularnie wymieniać informacje między nauczycielami, specjalistami i rodzicami o postępach oraz trudnościach dziecka;",
+      "- dostosowywać metody pracy do aktualnego poziomu funkcjonowania, tempa uczenia się i możliwości koncentracji dziecka;",
+      "- monitorować skuteczność zastosowanych form wsparcia i modyfikować je w razie potrzeby."
+    ].join("\n");
+  }
+
+  if (key.includes("zajec rewalidacyjnych") || key.includes("ks zajecia specjalistyczne")) {
+    return [
+      "- prowadzić zajęcia ukierunkowane na usprawnianie funkcji poznawczych, komunikacyjnych, percepcyjno-motorycznych i grafomotorycznych, zgodnie z rozpoznanymi trudnościami;",
+      "- zapewnić wsparcie specjalistyczne wzmacniające rozwój mowy, koncentrację uwagi, samodzielność oraz funkcjonowanie emocjonalno-społeczne;",
+      "- dobierać ćwiczenia do aktualnych możliwości dziecka, z zachowaniem stopniowania trudności i częstego wzmacniania pozytywnego;",
+      "- systematycznie dokumentować postępy i dostosowywać zakres zajęć do efektów pracy."
+    ].join("\n");
+  }
+
+  return [
+    `Na podstawie opisu funkcjonowania ${childName} należy zaplanować wsparcie adekwatne do rozpoznanych trudności i mocnych stron dziecka.`,
+    basis
+  ].join("\n\n");
+}
+
+function selectKsFallbackFacts(section: TemplateSection, input: GenerationInput) {
+  const text = [input.childProfile, ...(input.sourceTexts ?? [])].filter(Boolean).join("\n");
+  const normalizedQuestion = normalizeForCopyCheck([section.fieldId, section.instruction, section.title].filter(Boolean).join(" "));
+  const baseTerms = ["trudno", "diagno", "mowa", "koncentr", "uwag", "pamiec", "motory", "grafomot", "percepc", "koordyn", "emoc", "spolecz", "komunik", "afaz", "terap", "mocn"];
+  const extraTerms = normalizedQuestion.includes("mocne") ? ["mocn", "dobr", "potraf", "uzdol", "zasob"] : [];
+  const terms = [...baseTerms, ...extraTerms];
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.replace(/\s+/g, " ").trim())
+    .filter((sentence) => sentence.length >= 50 && sentence.length <= 360)
+    .filter((sentence) => {
+      const normalized = normalizeForCopyCheck(sentence);
+      return terms.some((term) => normalized.includes(term));
+    })
+    .slice(0, 4);
 }
 
 function sanitizeFieldAnswer(answer?: string | null, sourceTexts?: string[], previousAnswers: string[] = []) {
@@ -868,6 +961,22 @@ function selectRelevantSourceFragments(section: TemplateSection, sourceTexts?: s
 
 function classifyWwrField(section: TemplateSection) {
   const text = [section.parentHeading, section.instruction, section.title].filter(Boolean).join(" ").toLowerCase();
+  const normalized = normalizeForCopyCheck(text);
+  if (
+    normalized.includes("indywidualne potrzeby") ||
+    normalized.includes("dzialan podczas biezacej pracy") ||
+    normalized.includes("zintegrowanych dzialan") ||
+    normalized.includes("zajec rewalidacyjnych") ||
+    normalized.includes("zajecia rewalidacyjne") ||
+    normalized.includes("pomocy psychologiczno pedagogicznej") ||
+    normalized.includes("wspolpracy z rodzicami") ||
+    normalized.includes("sprzet specjalistyczny")
+  ) {
+    return "recommendations";
+  }
+  if (normalized.includes("mocne strony") || normalized.includes("uzdolnienia dziecka")) {
+    return "diagnosis";
+  }
   if (text.includes("możliwości psychofizycz") || text.includes("potencjał rozwoj") || text.includes("mocne strony")) {
     return "diagnosis";
   }
@@ -890,6 +999,44 @@ function classifyWwrField(section: TemplateSection) {
 
 function detailedWwrInstruction(section: TemplateSection) {
   const text = [section.parentHeading, section.instruction, section.title].filter(Boolean).join(" ").toLowerCase();
+  const normalized = normalizeForCopyCheck(text);
+  if (normalized.includes("indywidualne potrzeby") || normalized.includes("potrzebyrozwojowe") || normalized.includes("mozliwoscipsychofizyczne")) {
+    return [
+      "Instrukcja szczegółowa dla pola KS:",
+      "Opisz indywidualne potrzeby rozwojowe i edukacyjne oraz możliwości psychofizyczne dziecka. Wyprowadź je z rozpoznanych trudności, mocnych stron, diagnoz, obserwacji i wyników badań źródłowych.",
+      "Nie wymagaj, aby w źródłach występowało dosłowne sformułowanie z pytania. Jeżeli źródła opisują trudności, mocne strony, koncentrację, mowę, funkcjonowanie poznawcze, emocjonalne, społeczne, motoryczne lub edukacyjne, oznacza to, że są dane do tego pola.",
+      "Uwzględnij zarówno potrzeby wsparcia, jak i realne możliwości dziecka. Nie wpisuj 'Brak danych w załączonych materiałach.', jeśli w źródłach występują jakiekolwiek informacje diagnostyczne o funkcjonowaniu dziecka."
+    ].join("\n");
+  }
+  if (normalized.includes("dzialan podczas biezacej pracy") || normalized.includes("pracyzdzieckiem") || normalized.includes("wspolpracy z rodzicami")) {
+    return [
+      "Instrukcja szczegółowa dla pola KS:",
+      "Sformułuj konkretne działania do bieżącej pracy z dzieckiem oraz współpracy z rodzicami. Oprzyj je na trudnościach, mocnych stronach i potrzebach opisanych w źródłach.",
+      "Możesz wskazać dostosowanie poleceń, tempo pracy, przerwy, wzmacnianie koncentracji, ćwiczenia komunikacji, grafomotoryki, percepcji, współpracę specjalistów z rodzicami oraz systematyczne monitorowanie postępów.",
+      "Nie wpisuj 'Brak danych w załączonych materiałach.', jeśli źródła zawierają opis trudności albo diagnozę dziecka."
+    ].join("\n");
+  }
+  if (normalized.includes("zintegrowanych dzialan") || normalized.includes("zintegrowanychdzialan") || normalized.includes("nauczycieli i specjalistow") || normalized.includes("nauczycieli ispecjalistow")) {
+    return [
+      "Instrukcja szczegółowa dla pola KS:",
+      "Opisz zintegrowane działania nauczycieli i specjalistów wynikające z materiału diagnostycznego. Uwzględnij spójność oddziaływań edukacyjnych, terapeutycznych i wychowawczych.",
+      "Wskaż współpracę nauczycieli, specjalistów, rodziców, logopedy, psychologa, pedagoga lub terapeutów, jeśli rodzaj trudności uzasadnia takie wsparcie.",
+      "Nie oczekuj dosłownego gotowego zalecenia w źródle; zalecenie ma wynikać z opisanych potrzeb dziecka."
+    ].join("\n");
+  }
+  if (normalized.includes("zajec rewalidacyjnych") || normalized.includes("zajecia rewalidacyjne") || normalized.includes("socjoterapeutycznych") || normalized.includes("resocjalizacyjnych")) {
+    return [
+      "Instrukcja szczegółowa dla pola KS:",
+      "Wskaż rodzaj i formy zajęć specjalistycznych lub rewalidacyjnych adekwatnych do rozpoznanych trudności. Oprzyj się na diagnozach, badaniach, terapii i funkcjonowaniu dziecka opisanym w dokumentach.",
+      "Jeżeli źródła wskazują trudności mowy, komunikacji, uwagi, funkcji poznawczych, motorycznych, emocjonalnych lub społecznych, zaproponuj odpowiednie formy wsparcia bez dopisywania nowych rozpoznań."
+    ].join("\n");
+  }
+  if (normalized.includes("pomocy psychologiczno pedagogicznej") || normalized.includes("formy pomocy")) {
+    return "Instrukcja szczegółowa dla pola KS:\nOpisz formy pomocy psychologiczno-pedagogicznej wynikające z diagnozy i opisu funkcjonowania dziecka. Uwzględnij wsparcie pedagogiczne, psychologiczne, logopedyczne, terapeutyczne i konsultacje z rodzicami, jeśli uzasadniają to źródła.";
+  }
+  if (normalized.includes("sprzet specjalistyczny") || normalized.includes("srodki dydaktyczne") || normalized.includes("technologie wspomagajace")) {
+    return "Instrukcja szczegółowa dla pola KS:\nWskaż pomoce, środki dydaktyczne, dostosowania organizacyjne lub technologie wspomagające tylko w zakresie wynikającym z opisanych trudności dziecka. Jeżeli brak podstaw do sprzętu specjalistycznego, opisz potrzebne pomoce edukacyjne i organizacyjne zamiast pozostawiać pole puste.";
+  }
   if (text.includes("możliwości psychofizycz") || text.includes("potencjał rozwoj")) {
     return [
       "Instrukcja szczegółowa dla tego pola:",
