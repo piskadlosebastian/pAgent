@@ -410,6 +410,17 @@ function extractTextMarkerSections(lines: string[]): TemplateSection[] {
 export function inferWwrFieldId(section: Pick<TemplateSection, "instruction" | "parentHeading" | "pointNumber" | "occurrence"> & { title?: string }) {
   const text = normalizeForFieldId([section.parentHeading, section.pointNumber, section.instruction, section.title].filter(Boolean).join(" "));
 
+  if (hasAny(text, ["przyczyny wystepujacych trudnosci", "trudnosci w uczeniu sie", "funkcjonowaniu psychospołecznym", "funkcjonowaniu psychosolecznym", "barier utrudniajacych jego funkcjonowanie"])) return "ks_przyczyny_trudnosci";
+  if (hasAny(text, ["mocne strony", "mocne stronyi", "uzdolnienia dziecka", "uzdolnienia dzieckalubucznia"])) return "ks_mocne_strony";
+  if (hasAny(text, ["indywidualne potrzeby", "potrzebyrozwojowe", "potrzeby rozwojowe", "mozliwoscipsychofizyczne", "mozliwosci psychofizyczne dziecka lub ucznia wynikajace"])) return "ks_potrzeby_mozliwosci";
+  if (hasAny(text, ["dzialan podczas biezacej pracy", "pracyzdzieckiem", "pracy z dzieckiem", "wspolpracy z rodzicami"])) return "ks_biezaca_praca";
+  if (hasAny(text, ["zintegrowanychdzialan", "zintegrowanych dzialan", "nauczycieli ispecjalistow", "nauczycieli i specjalistow"])) return "ks_zintegrowane_dzialania";
+  if (hasAny(text, ["formy pomocy psychologiczno pedagogicznej", "pomocy psychologiczno pedagogicznej"])) return "ks_pomoc_psychologiczno_pedagogiczna";
+  if (hasAny(text, ["zajecia rewalidacyjne", "rewalidacyjnych", "resocjalizacyjnych", "socjoterapeutycznych"])) return "ks_zajecia_specjalistyczne";
+  if (hasAny(text, ["zakres wspolpracy nauczycieli", "wspolpracy nauczycieli", "rodzicami dziecka"])) return "ks_wspolpraca";
+  if (hasAny(text, ["sprzet specjalistyczny", "srodki dydaktyczne", "technologie wspomagajace"])) return "ks_sprzet_i_pomoce";
+  if (hasAny(text, ["przygotowanie srodowiska szkoly", "przygotowanie srodowiska", "przyjecie ucznia po leczeniu"])) return "ks_przygotowanie_srodowiska";
+
   if (hasAny(text, ["mozliwosci psychofizycz", "potencjale rozwoj", "mocnych stron", "uzdolnien"])) return "diagnoza_potencjal";
   if (hasAny(text, ["zasobach w srodowisku", "srodowisku opieki", "wychowania i nauczania"])) return "diagnoza_zasoby";
   if (hasAny(text, ["barierach", "ograniczeniach", "wplywajacych na funkcjonowanie"])) return "diagnoza_bariery";

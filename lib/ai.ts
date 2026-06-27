@@ -125,8 +125,7 @@ async function generateFieldsWithOnlineAgent(
   for (const section of sections) {
     const key = sectionGenerationKey(section);
     if (key && generatedKeys.has(key)) {
-      output[section.title] = "";
-      if (section.fieldId) output[section.fieldId] = "";
+      output[section.title] = output[key] ?? (section.fieldId ? output[section.fieldId] : "") ?? "";
       continue;
     }
     if (key) generatedKeys.add(key);
@@ -266,8 +265,7 @@ async function generateFieldsWithDify(input: GenerationInput, sections: Template
   for (const section of sections) {
     const key = sectionGenerationKey(section);
     if (key && generatedKeys.has(key)) {
-      output[section.title] = "";
-      if (section.fieldId) output[section.fieldId] = "";
+      output[section.title] = output[key] ?? (section.fieldId ? output[section.fieldId] : "") ?? "";
       continue;
     }
     if (key) generatedKeys.add(key);
